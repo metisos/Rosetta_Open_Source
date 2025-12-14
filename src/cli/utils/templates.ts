@@ -15,6 +15,19 @@ const EMBEDDED_TEMPLATES: Record<string, string> = {
 
 > [One-sentence description of your project]
 
+<!-- rosetta:sections:
+overview
+tech stack
+architecture
+directory structure
+conventions
+entry points
+key patterns
+module index
+gotchas
+agent notes
+-->
+
 ## Overview
 
 [2-4 sentences. What this project IS and DOES.]
@@ -65,6 +78,13 @@ src/
 |--------|------|-------------|-----------|
 | | \`.rosetta/modules/.md\` | | |
 
+### Module Loading Policy
+
+- Always load this root \`ROSETTA.md\` first.
+- Modules are additive: include modules relevant to the current task without removing root context.
+- If definitions conflict, the module file takes precedence for its scoped area while root conventions remain the baseline elsewhere.
+- Humans may curate modules, but agents should never drop modules from context unless the task is unrelated.
+
 ## Gotchas
 
 - [Non-obvious things that will cause problems]
@@ -75,6 +95,7 @@ src/
   AGENTS: Append learnings below this line.
   Format: ### YYYY-MM-DD | agent-name
   Humans curate this section periodically.
+  Rules: Agents may only append new entries and must include a timestamp and identifier.
 -->
 
 ---

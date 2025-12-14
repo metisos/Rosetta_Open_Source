@@ -64,7 +64,7 @@ export function parseRosettaFile(content: string): ParsedRosetta {
     const line = lines[i];
 
     // Check for metadata comments
-    const metadataMatch = line.match(/<!--\s*rosetta:(\w+):(.+?)\s*-->/);
+    const metadataMatch = line.match(/<!--\s*rosetta:([\w-]+):(.+?)\s*-->/);
     if (metadataMatch) {
       const [, key, value] = metadataMatch;
       if (key === 'version') metadata.version = value;
