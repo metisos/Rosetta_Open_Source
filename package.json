@@ -1,7 +1,7 @@
 {
   "name": "rosetta-context",
-  "version": "1.0.1",
-  "description": "Agent codebase understanding protocol - Help AI coding agents understand your codebase efficiently",
+  "version": "1.1.0",
+  "description": "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   "main": "dist/index.js",
   "bin": {
     "rosetta": "./dist/cli/index.js"
