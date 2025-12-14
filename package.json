@@ -34,12 +34,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/metisos/rosetta.git"
+    "url": "git+https://github.com/metisos/Rosetta_Open_Source.git"
   },
   "bugs": {
-    "url": "https://github.com/metisos/rosetta/issues"
+    "url": "https://github.com/metisos/Rosetta_Open_Source/issues"
   },
-  "homepage": "https://github.com/metisos/rosetta#readme",
+  "homepage": "https://github.com/metisos/Rosetta_Open_Source#readme",
   "engines": {
     "node": ">=18.0.0"
   },
