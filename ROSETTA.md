@@ -2,6 +2,19 @@
 
 > Agent-first codebase context protocol - enables AI agents to build and share institutional knowledge about codebases.
 
+<!-- rosetta:sections:
+overview
+tech stack
+architecture
+directory structure
+conventions
+entry points
+key patterns
+module index
+gotchas
+agent notes
+-->
+
 ## Overview
 
 Rosetta is both a protocol (ROSETTA.md format) and a CLI tool that helps AI coding agents understand codebases efficiently. Agents create ROSETTA.md with project context, add notes as they learn, and future sessions automatically load this knowledge. The CLI provides human helpers for scaffolding and validation.
@@ -117,6 +130,13 @@ const validation = validateSections(parsed, REQUIRED_SECTIONS);
 | cli | `.rosetta/modules/cli.md` | CLI commands | Working on commands |
 | parser | `.rosetta/modules/parser.md` | Markdown parsing | Parser changes |
 
+### Module Loading Policy
+
+- Always load this root `ROSETTA.md` first.
+- Modules are additive: include modules relevant to the current task without removing root context.
+- If definitions conflict, the module file takes precedence for its scoped area while root conventions remain the baseline elsewhere.
+- Humans may curate modules, but agents should never drop modules from context unless the task is unrelated.
+
 ## Gotchas
 
 - chalk v5 is ESM-only and breaks CommonJS builds - must use chalk v4
@@ -130,14 +150,24 @@ const validation = validateSections(parsed, REQUIRED_SECTIONS);
   AGENTS: Append learnings below this line.
   Format: ### YYYY-MM-DD | agent-name
   Humans curate this section periodically.
+  Rules: Agents may only append new entries and must include a timestamp and identifier.
 -->
 
 ### 2024-12-14 | claude
 - Initial Rosetta context created for the Rosetta project itself
 - This project uses its own protocol for self-documentation
 
+### 2025-12-14 | gpt-5.1-codex-max
+- Confirmed schema marker, module loading policy, and agent note governance are documented consistently across root docs and templates.
+- Automated tests are not present; `npm test` exits with status 1 due to missing test files.
+
+### 2025-12-14 | gpt-5.1-codex-max
+- Automated Vitest suites now cover parser utilities and template rendering; testing is no longer missing.
+- ESLint configuration and dependencies were added so `npm run lint` is actionable instead of placeholder-only.
+- Production checklist: run `npm test`, `npm run lint`, and `npm run typecheck` before releases.
+
 ---
 
 <!-- rosetta:version:1.0 -->
-<!-- rosetta:last-updated:2024-12-14 -->
+<!-- rosetta:last-updated:2025-12-14 -->
 <!-- rosetta:paths:src/**/*.ts -->

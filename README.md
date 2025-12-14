@@ -100,6 +100,19 @@ your-project/
 
 > One-sentence project description
 
+<!-- rosetta:sections:
+overview
+tech stack
+architecture
+directory structure
+conventions
+entry points
+key patterns
+module index
+gotchas
+agent notes
+-->
+
 ## Overview
 2-4 sentences about what this project does.
 
@@ -135,6 +148,13 @@ your-project/
 <!-- Agents append learnings here -->
 ```
 
+### Loading Rules
+
+- Load the root `ROSETTA.md` before any module files.
+- Modules are additive context: load only those relevant to the current task without replacing the root content.
+- If module guidance conflicts with root guidance, the module governs its scoped area while the root remains authoritative elsewhere.
+- Agent Notes are append-only and each entry must include a timestamp plus agent identifier.
+
 ## Installation
 
 ### As a CLI Tool
@@ -153,6 +173,16 @@ rosetta validate          # Validate structure
 rosetta add-module <name> # Create module file
 rosetta note "message"    # Add a note manually
 rosetta bootstrap         # Output bootstrap prompt
+```
+
+### Quality Gates
+
+Run the automated checks before releasing or publishing a package:
+
+```bash
+npm test        # Vitest suite
+npm run lint    # ESLint with TypeScript rules
+npm run typecheck # TypeScript compiler sanity check
 ```
 
 ### As a Library
