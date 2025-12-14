@@ -1,37 +1,46 @@
 # Rosetta
 
-> Agent codebase understanding protocol - Help AI coding agents understand your codebase efficiently
+**Agent Codebase Understanding Protocol**
 
-[![npm version](https://badge.fury.io/js/rosetta-context.svg)](https://badge.fury.io/js/rosetta-context)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Rosetta is an open-source protocol and CLI tool that enables AI coding agents to quickly understand a codebase without exhausting their context window. It provides a standardized, token-efficient format for capturing essential codebase knowledge.
 
-Rosetta is an open-source protocol and CLI tool that enables AI coding agents (Claude Code, Codex, Cursor, Aider, etc.) to quickly understand a codebase without blowing out their context window.
-
-**The name references the Rosetta Stone**—the artifact that enabled translation of previously unreadable Egyptian hieroglyphics. Similarly, Rosetta serves as a translation layer between human-written code and agent understanding.
+The name references the Rosetta Stone—the artifact that enabled translation of previously unreadable Egyptian hieroglyphics. Similarly, Rosetta serves as a translation layer between human-written code and agent understanding.
 
 ## The Problem
 
 AI coding agents face a fundamental conflict:
 
 1. **Deep understanding requires context** — Agents need to know architecture, conventions, patterns, and gotchas to be effective
-2. **Context is expensive and limited** — Loading entire codebases is slow, costly, and counterproductive
+2. **Context is expensive and limited** — Loading entire codebases is slow, costly, and counterproductive (signal lost in noise)
 3. **Sessions are stateless** — Every new agent session starts from zero, re-learning what previous sessions discovered
+
+### Current Workarounds (All Inadequate)
+
+| Approach | Problem |
+|----------|---------|
+| Load everything | Context overflow, token waste, lost signal |
+| README.md | Written for humans, narrative-heavy, not structured for agent parsing |
+| Let agent explore | Slow, burns tokens on discovery, inconsistent results |
+| Inline comments | Scattered, no hierarchy, cannot convey architecture |
 
 ## The Solution
 
 Rosetta provides:
 
-- **`ROSETTA.md`** — A standardized, token-efficient context file at your project root
-- **`.rosetta/modules/`** — Deep-dive documentation for specific modules (auth, api, database, etc.)
-- **`.rosetta/notes.md`** — Append-only file for agents to record learnings
+- **ROSETTA.md** — A standardized, token-efficient context file at your project root
+- **.rosetta/modules/** — Deep-dive documentation for specific modules (auth, api, database, etc.)
+- **.rosetta/notes.md** — Append-only file where agents record learnings for future sessions
 - **CLI tooling** — Initialize, validate, and maintain Rosetta files
+
+## Installation
+
+```bash
+npm install -g rosetta-context
+```
 
 ## Quick Start
 
 ```bash
-# Install globally
-npm install -g rosetta-context
-
 # Initialize Rosetta in your project
 rosetta init
 
@@ -66,12 +75,14 @@ your-project/
 | `rosetta init` | Initialize Rosetta in a project |
 | `rosetta init --bootstrap` | Initialize and output bootstrap prompt for AI |
 | `rosetta validate` | Check Rosetta files for structural issues |
-| `rosetta status` | Show staleness and coverage info |
+| `rosetta status` | Show staleness and coverage information |
 | `rosetta add-module <name>` | Scaffold a new module file |
 | `rosetta note <message>` | Manually add a note |
 | `rosetta bootstrap` | Output the bootstrap protocol |
 
 ## ROSETTA.md Structure
+
+The root file follows a standardized structure that agents depend on:
 
 ```markdown
 # Rosetta
@@ -122,7 +133,7 @@ src/
 
 ## Agent Integration
 
-### Claude Code (CLAUDE.md)
+### For Claude Code (CLAUDE.md)
 
 ```markdown
 ## Project Context
@@ -134,7 +145,7 @@ This project uses Rosetta for agent context management.
 3. Before finishing, add learnings to .rosetta/notes.md
 ```
 
-### Cursor (.cursorrules)
+### For Cursor (.cursorrules)
 
 ```markdown
 When working in this codebase:
@@ -143,52 +154,162 @@ When working in this codebase:
 - Append discoveries to .rosetta/notes.md before ending
 ```
 
-### Metis Code
+### For Aider
 
-Rosetta is built into Metis Code. It automatically:
-- Reads ROSETTA.md on session start
-- Loads relevant module files based on task
-- Appends learnings to notes.md
+Add to your `.aider.conf.yml`:
+
+```yaml
+read:
+  - ROSETTA.md
+  - .rosetta/notes.md
+```
 
 ## Bootstrap Protocol
 
-For new projects, use the bootstrap protocol to have an AI agent populate Rosetta:
+For new projects, use the bootstrap protocol to have an AI agent analyze and populate Rosetta:
 
 ```bash
 # Get the bootstrap prompt
 rosetta bootstrap | pbcopy  # Copy to clipboard (macOS)
+rosetta bootstrap | xclip -selection clipboard  # Linux
 
 # Paste into your AI coding agent
 ```
 
 The bootstrap protocol guides agents through:
-1. Analyzing project structure
-2. Identifying patterns and conventions
-3. Creating ROSETTA.md with appropriate sections
-4. Scaffolding key module files
+
+1. Analyzing project structure and existing documentation
+2. Identifying patterns, conventions, and architecture
+3. Creating ROSETTA.md with all required sections
+4. Scaffolding priority module files (auth, database, api)
 
 ## Token Efficiency
 
 Rosetta is designed for minimal context consumption:
 
-| File | Target Size | Max Size |
-|------|-------------|----------|
+| File | Target Size | Maximum Size |
+|------|-------------|--------------|
 | ROSETTA.md | 800-1200 tokens | 2000 tokens |
 | Module file | 400-600 tokens | 1000 tokens |
+| notes.md | Grows over time | N/A |
 
-Typical selective load: ~1500 tokens (root + 1 module)
+**Typical selective load:** ~1500 tokens (root + 1 module)
+
+### What to Include vs. Exclude
+
+**Include:**
+- Patterns that repeat across the codebase
+- Non-obvious architectural decisions
+- Things that would take 10+ minutes to discover
+- Conventions that differ from framework defaults
+
+**Exclude:**
+- Standard framework behavior (documented elsewhere)
+- Self-explanatory file purposes
+- Information already in README (reference it instead)
+- Aspirational patterns not actually used
+
+## Configuration
+
+The `.rosetta/config.yml` file controls CLI behavior:
+
+```yaml
+version: 1
+
+staleness:
+  warning: 30    # Days before showing staleness warning
+  critical: 90   # Days before marking as critically stale
+
+track:
+  - src/services/**/*.ts
+  - prisma/schema.prisma
+
+ignore:
+  - "*.test.ts"
+  - "*.spec.ts"
+  - "__tests__/**"
+
+modules:
+  auth:
+    - src/services/auth/**
+    - src/lib/auth.ts
+```
+
+## Programmatic API
+
+Rosetta exports utilities for integration into coding agents:
+
+```typescript
+import {
+  parseRosettaFile,
+  validateSections,
+  parseModuleIndex,
+  parseAgentNotes,
+  REQUIRED_SECTIONS,
+  ROSETTA_PROTOCOL,
+} from 'rosetta-context';
+
+// Parse a ROSETTA.md file
+const parsed = parseRosettaFile(content);
+
+// Validate required sections
+const validation = validateSections(parsed, REQUIRED_SECTIONS);
+
+// Extract module index
+const modules = parseModuleIndex(content);
+
+// Parse agent notes
+const notes = parseAgentNotes(notesContent);
+```
+
+## Agent Loading Protocol
+
+When integrating Rosetta into a coding agent, follow this protocol:
+
+### On Session Start
+
+1. Read `ROSETTA.md` first (always)
+2. Review the Module Index table
+3. Load only relevant module files from `.rosetta/modules/`
+4. Check `.rosetta/notes.md` for recent learnings
+
+### During Work
+
+- Refer to Conventions and Key Patterns when writing code
+- Check Gotchas before modifying unfamiliar areas
+
+### Before Session End
+
+If you discovered something valuable:
+
+1. Open `.rosetta/notes.md`
+2. Append an entry:
+   ```
+   ### YYYY-MM-DD | [agent-name]
+   - [Your learning here]
+   ```
+3. Keep entries concise and actionable
+4. Do not duplicate existing notes or documented gotchas
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+Contributions are welcome. Please ensure:
+
+- All CLI commands have corresponding tests
+- Templates follow the token efficiency guidelines
+- Documentation is updated for new features
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Author
+## About
 
-Christian Johnson ([@metisos](https://github.com/metisos))
+Rosetta is developed and maintained by Metis Analytics.
+
+**Author:** Christian Johnson
+**Email:** cjohnson@metisos.com
+**Repository:** https://github.com/metisos/rosetta
 
 ---
 
