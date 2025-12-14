@@ -1,0 +1,63 @@
+{
+  "name": "rosetta-context",
+  "version": "1.0.0",
+  "description": "Agent codebase understanding protocol - Help AI coding agents understand your codebase efficiently",
+  "main": "dist/index.js",
+  "bin": {
+    "rosetta": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/cli/index.js",
+    "test": "vitest",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "coding-assistant",
+    "documentation",
+    "context",
+    "claude",
+    "claude-code",
+    "codex",
+    "cursor",
+    "aider",
+    "copilot",
+    "llm",
+    "codebase",
+    "developer-tools"
+  ],
+  "author": "Christian Johnson <cjohnson@metisos.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metisos/rosetta.git"
+  },
+  "bugs": {
+    "url": "https://github.com/metisos/rosetta/issues"
+  },
+  "homepage": "https://github.com/metisos/rosetta#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "glob": "^10.3.10",
+    "yaml": "^2.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.2",
+    "vitest": "^1.0.0"
+  }
+}

@@ -1,0 +1,33 @@
+# Rosetta Configuration
+# https://github.com/metisos/rosetta
+
+version: 1
+
+# Staleness thresholds in days
+staleness:
+  warning: 30    # Days before showing staleness warning
+  critical: 90   # Days before marking as critically stale
+
+# File patterns to track for drift detection (optional)
+# When these files change, related module docs may need updating
+track: []
+  # - src/services/**/*.ts
+  # - prisma/schema.prisma
+  # - src/lib/**/*.ts
+
+# Patterns to ignore in status checks
+ignore:
+  - "*.test.ts"
+  - "*.spec.ts"
+  - "__tests__/**"
+  - "__mocks__/**"
+
+# Module-to-path mapping for staleness detection (optional)
+# Format: module-name: [glob patterns]
+modules: {}
+  # auth:
+  #   - src/services/auth/**
+  #   - src/lib/auth.ts
+  # database:
+  #   - prisma/**
+  #   - src/lib/db.ts
