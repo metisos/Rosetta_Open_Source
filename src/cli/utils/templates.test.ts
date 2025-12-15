@@ -38,3 +38,32 @@ describe('loadAndRenderTemplate', () => {
     vi.useRealTimers();
   });
 });
+
+describe('agent config templates', () => {
+  it('loads Claude agent config template', () => {
+    const template = loadTemplate('agent-config-claude.md');
+    expect(template).toContain('## Rosetta Protocol');
+    expect(template).toContain('Read ROSETTA.md immediately');
+    expect(template).toContain('.rosetta/notes.md');
+  });
+
+  it('loads Cursor agent config template', () => {
+    const template = loadTemplate('agent-config-cursor.md');
+    expect(template).toContain('## Rosetta Protocol');
+    expect(template).toContain('ALWAYS read ROSETTA.md first');
+  });
+
+  it('loads Aider agent config template', () => {
+    const template = loadTemplate('agent-config-aider.yml');
+    expect(template).toContain('ROSETTA.md');
+    expect(template).toContain('.rosetta/notes.md');
+  });
+
+  it('bootstrap prompt includes agent config instructions', () => {
+    const template = loadTemplate('bootstrap-prompt.md');
+    expect(template).toContain('CRITICAL: Update agent instruction files');
+    expect(template).toContain('CLAUDE.md');
+    expect(template).toContain('.cursorrules');
+    expect(template).toContain('.aider.conf.yml');
+  });
+});

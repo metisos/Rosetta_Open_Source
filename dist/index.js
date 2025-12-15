@@ -75,7 +75,7 @@ function parseRosettaFile(content) {
   let currentContent = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const metadataMatch = line.match(/<!--\s*rosetta:(\w+):(.+?)\s*-->/);
+    const metadataMatch = line.match(/<!--\s*rosetta:([\w-]+):(.+?)\s*-->/);
     if (metadataMatch) {
       const [, key, value] = metadataMatch;
       if (key === "version") metadata.version = value;
@@ -201,6 +201,19 @@ var EMBEDDED_TEMPLATES = {
 
 > [One-sentence description of your project]
 
+<!-- rosetta:sections:
+overview
+tech stack
+architecture
+directory structure
+conventions
+entry points
+key patterns
+module index
+gotchas
+agent notes
+-->
+
 ## Overview
 
 [2-4 sentences. What this project IS and DOES.]
@@ -251,6 +264,13 @@ src/
 |--------|------|-------------|-----------|
 | | \`.rosetta/modules/.md\` | | |
 
+### Module Loading Policy
+
+- Always load this root \`ROSETTA.md\` first.
+- Modules are additive: include modules relevant to the current task without removing root context.
+- If definitions conflict, the module file takes precedence for its scoped area while root conventions remain the baseline elsewhere.
+- Humans may curate modules, but agents should never drop modules from context unless the task is unrelated.
+
 ## Gotchas
 
 - [Non-obvious things that will cause problems]
@@ -261,6 +281,7 @@ src/
   AGENTS: Append learnings below this line.
   Format: ### YYYY-MM-DD | agent-name
   Humans curate this section periodically.
+  Rules: Agents may only append new entries and must include a timestamp and identifier.
 -->
 
 ---
@@ -397,6 +418,62 @@ This project needs Rosetta context files for AI coding agents. Please:
    - notes.md with header
    - config.yml with defaults
 
+4. **CRITICAL: Update agent instruction files** to ensure future sessions use Rosetta:
+
+   Check for and update these files (create if they don't exist):
+
+   **For Claude Code (.claude/CLAUDE.md or CLAUDE.md):**
+   \`\`\`markdown
+   ## Rosetta Protocol
+
+   This project uses Rosetta for persistent AI context.
+
+   **On session start:**
+   1. Read ROSETTA.md immediately for project context
+   2. Check Module Index and load relevant .rosetta/modules/ files
+   3. Review .rosetta/notes.md for recent discoveries
+
+   **During work:**
+   - Follow conventions documented in ROSETTA.md
+   - Check Gotchas before modifying unfamiliar areas
+   - Reference Key Patterns for consistent code style
+
+   **Before session end:**
+   - Append valuable discoveries to .rosetta/notes.md
+   - Format: ### YYYY-MM-DD | claude
+   - Keep notes actionable and non-obvious
+   \`\`\`
+
+   **For Cursor (.cursorrules):**
+   \`\`\`markdown
+   ## Rosetta Protocol
+
+   This codebase uses Rosetta for AI context management.
+
+   ALWAYS read ROSETTA.md first for:
+   - Project architecture and tech stack
+   - Coding conventions and patterns
+   - Known gotchas and warnings
+
+   Load relevant modules from .rosetta/modules/ based on your task.
+   Append learnings to .rosetta/notes.md before ending session.
+   \`\`\`
+
+   **For Aider (.aider.conf.yml):**
+   \`\`\`yaml
+   read:
+     - ROSETTA.md
+     - .rosetta/notes.md
+   \`\`\`
+
+   **For other agents:** Add similar instructions to their config files.
+
+### Why Step 4 is Critical
+
+Without updating agent instruction files, future sessions won't know Rosetta exists.
+This step makes Rosetta self-propagating - once initialized, every future agent session
+automatically benefits from accumulated context.
+
 ### Quality Guidelines
 
 **Focus on:**
@@ -413,7 +490,53 @@ This project needs Rosetta context files for AI coding agents. Please:
 - ROSETTA.md: 800-1200 tokens
 - Module files: 400-600 tokens each
 
-When complete, summarize what you created and any areas that need human review.
+When complete, summarize:
+1. What Rosetta files you created
+2. Which agent config files you updated/created
+3. Any areas that need human review
+`,
+  "agent-config-claude.md": `## Rosetta Protocol
+
+This project uses Rosetta for persistent AI context.
+
+**On session start:**
+1. Read ROSETTA.md immediately for project context
+2. Check Module Index and load relevant .rosetta/modules/ files
+3. Review .rosetta/notes.md for recent discoveries
+
+**During work:**
+- Follow conventions documented in ROSETTA.md
+- Check Gotchas before modifying unfamiliar areas
+- Reference Key Patterns for consistent code style
+
+**Before session end:**
+- Append valuable discoveries to .rosetta/notes.md
+- Format: ### YYYY-MM-DD | claude
+- Keep notes actionable and non-obvious
+
+**If ROSETTA.md doesn't exist:**
+- Run \`rosetta init\` or create it by analyzing the codebase
+- See: https://github.com/metisos/Rosetta_Open_Source
+`,
+  "agent-config-cursor.md": `## Rosetta Protocol
+
+This codebase uses Rosetta for AI context management.
+
+ALWAYS read ROSETTA.md first for:
+- Project architecture and tech stack
+- Coding conventions and patterns
+- Known gotchas and warnings
+
+Load relevant modules from .rosetta/modules/ based on your task.
+Append learnings to .rosetta/notes.md before ending session.
+
+If ROSETTA.md doesn't exist, create it by analyzing the codebase.
+See: https://github.com/metisos/Rosetta_Open_Source
+`,
+  "agent-config-aider.yml": `# Rosetta Protocol - Auto-load context files
+read:
+  - ROSETTA.md
+  - .rosetta/notes.md
 `
 };
 function loadTemplate(templateName) {
@@ -442,7 +565,10 @@ var TEMPLATES = {
   MODULE: "module.md",
   NOTES: "notes.md",
   CONFIG: "config.yml",
-  BOOTSTRAP: "bootstrap-prompt.md"
+  BOOTSTRAP: "bootstrap-prompt.md",
+  AGENT_CONFIG_CLAUDE: "agent-config-claude.md",
+  AGENT_CONFIG_CURSOR: "agent-config-cursor.md",
+  AGENT_CONFIG_AIDER: "agent-config-aider.yml"
 };
 
 // src/cli/utils/git.ts

@@ -25,7 +25,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/cli/index.ts
 var import_commander = require("commander");
-var import_chalk7 = __toESM(require("chalk"));
+var import_chalk8 = __toESM(require("chalk"));
 
 // src/cli/commands/init.ts
 var import_fs = __toESM(require("fs"));
@@ -37,6 +37,19 @@ var EMBEDDED_TEMPLATES = {
   "ROSETTA-minimal.md": `# Rosetta
 
 > [One-sentence description of your project]
+
+<!-- rosetta:sections:
+overview
+tech stack
+architecture
+directory structure
+conventions
+entry points
+key patterns
+module index
+gotchas
+agent notes
+-->
 
 ## Overview
 
@@ -88,6 +101,13 @@ src/
 |--------|------|-------------|-----------|
 | | \`.rosetta/modules/.md\` | | |
 
+### Module Loading Policy
+
+- Always load this root \`ROSETTA.md\` first.
+- Modules are additive: include modules relevant to the current task without removing root context.
+- If definitions conflict, the module file takes precedence for its scoped area while root conventions remain the baseline elsewhere.
+- Humans may curate modules, but agents should never drop modules from context unless the task is unrelated.
+
 ## Gotchas
 
 - [Non-obvious things that will cause problems]
@@ -98,6 +118,7 @@ src/
   AGENTS: Append learnings below this line.
   Format: ### YYYY-MM-DD | agent-name
   Humans curate this section periodically.
+  Rules: Agents may only append new entries and must include a timestamp and identifier.
 -->
 
 ---
@@ -234,6 +255,62 @@ This project needs Rosetta context files for AI coding agents. Please:
    - notes.md with header
    - config.yml with defaults
 
+4. **CRITICAL: Update agent instruction files** to ensure future sessions use Rosetta:
+
+   Check for and update these files (create if they don't exist):
+
+   **For Claude Code (.claude/CLAUDE.md or CLAUDE.md):**
+   \`\`\`markdown
+   ## Rosetta Protocol
+
+   This project uses Rosetta for persistent AI context.
+
+   **On session start:**
+   1. Read ROSETTA.md immediately for project context
+   2. Check Module Index and load relevant .rosetta/modules/ files
+   3. Review .rosetta/notes.md for recent discoveries
+
+   **During work:**
+   - Follow conventions documented in ROSETTA.md
+   - Check Gotchas before modifying unfamiliar areas
+   - Reference Key Patterns for consistent code style
+
+   **Before session end:**
+   - Append valuable discoveries to .rosetta/notes.md
+   - Format: ### YYYY-MM-DD | claude
+   - Keep notes actionable and non-obvious
+   \`\`\`
+
+   **For Cursor (.cursorrules):**
+   \`\`\`markdown
+   ## Rosetta Protocol
+
+   This codebase uses Rosetta for AI context management.
+
+   ALWAYS read ROSETTA.md first for:
+   - Project architecture and tech stack
+   - Coding conventions and patterns
+   - Known gotchas and warnings
+
+   Load relevant modules from .rosetta/modules/ based on your task.
+   Append learnings to .rosetta/notes.md before ending session.
+   \`\`\`
+
+   **For Aider (.aider.conf.yml):**
+   \`\`\`yaml
+   read:
+     - ROSETTA.md
+     - .rosetta/notes.md
+   \`\`\`
+
+   **For other agents:** Add similar instructions to their config files.
+
+### Why Step 4 is Critical
+
+Without updating agent instruction files, future sessions won't know Rosetta exists.
+This step makes Rosetta self-propagating - once initialized, every future agent session
+automatically benefits from accumulated context.
+
 ### Quality Guidelines
 
 **Focus on:**
@@ -250,7 +327,53 @@ This project needs Rosetta context files for AI coding agents. Please:
 - ROSETTA.md: 800-1200 tokens
 - Module files: 400-600 tokens each
 
-When complete, summarize what you created and any areas that need human review.
+When complete, summarize:
+1. What Rosetta files you created
+2. Which agent config files you updated/created
+3. Any areas that need human review
+`,
+  "agent-config-claude.md": `## Rosetta Protocol
+
+This project uses Rosetta for persistent AI context.
+
+**On session start:**
+1. Read ROSETTA.md immediately for project context
+2. Check Module Index and load relevant .rosetta/modules/ files
+3. Review .rosetta/notes.md for recent discoveries
+
+**During work:**
+- Follow conventions documented in ROSETTA.md
+- Check Gotchas before modifying unfamiliar areas
+- Reference Key Patterns for consistent code style
+
+**Before session end:**
+- Append valuable discoveries to .rosetta/notes.md
+- Format: ### YYYY-MM-DD | claude
+- Keep notes actionable and non-obvious
+
+**If ROSETTA.md doesn't exist:**
+- Run \`rosetta init\` or create it by analyzing the codebase
+- See: https://github.com/metisos/Rosetta_Open_Source
+`,
+  "agent-config-cursor.md": `## Rosetta Protocol
+
+This codebase uses Rosetta for AI context management.
+
+ALWAYS read ROSETTA.md first for:
+- Project architecture and tech stack
+- Coding conventions and patterns
+- Known gotchas and warnings
+
+Load relevant modules from .rosetta/modules/ based on your task.
+Append learnings to .rosetta/notes.md before ending session.
+
+If ROSETTA.md doesn't exist, create it by analyzing the codebase.
+See: https://github.com/metisos/Rosetta_Open_Source
+`,
+  "agent-config-aider.yml": `# Rosetta Protocol - Auto-load context files
+read:
+  - ROSETTA.md
+  - .rosetta/notes.md
 `
 };
 function loadTemplate(templateName) {
@@ -275,7 +398,10 @@ var TEMPLATES = {
   MODULE: "module.md",
   NOTES: "notes.md",
   CONFIG: "config.yml",
-  BOOTSTRAP: "bootstrap-prompt.md"
+  BOOTSTRAP: "bootstrap-prompt.md",
+  AGENT_CONFIG_CLAUDE: "agent-config-claude.md",
+  AGENT_CONFIG_CURSOR: "agent-config-cursor.md",
+  AGENT_CONFIG_AIDER: "agent-config-aider.yml"
 };
 
 // src/cli/commands/init.ts
@@ -378,7 +504,7 @@ function parseRosettaFile(content) {
   let currentContent = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const metadataMatch = line.match(/<!--\s*rosetta:(\w+):(.+?)\s*-->/);
+    const metadataMatch = line.match(/<!--\s*rosetta:([\w-]+):(.+?)\s*-->/);
     if (metadataMatch) {
       const [, key, value] = metadataMatch;
       if (key === "version") metadata.version = value;
@@ -893,14 +1019,203 @@ async function bootstrapCommand(options) {
   }
 }
 
+// src/cli/commands/setup-agent.ts
+var import_fs7 = __toESM(require("fs"));
+var import_path7 = __toESM(require("path"));
+var import_chalk7 = __toESM(require("chalk"));
+var AGENT_CONFIGS = [
+  {
+    name: "Claude Code",
+    files: [".claude/CLAUDE.md", "CLAUDE.md"],
+    template: TEMPLATES.AGENT_CONFIG_CLAUDE,
+    appendMode: true,
+    sectionMarker: "## Rosetta Protocol"
+  },
+  {
+    name: "Cursor",
+    files: [".cursorrules"],
+    template: TEMPLATES.AGENT_CONFIG_CURSOR,
+    appendMode: true,
+    sectionMarker: "## Rosetta Protocol"
+  },
+  {
+    name: "Aider",
+    files: [".aider.conf.yml"],
+    template: TEMPLATES.AGENT_CONFIG_AIDER,
+    appendMode: false
+    // YAML needs special handling
+  }
+];
+function findExistingFile(files, cwd) {
+  for (const file of files) {
+    const filePath = import_path7.default.join(cwd, file);
+    if (import_fs7.default.existsSync(filePath)) {
+      return filePath;
+    }
+  }
+  return null;
+}
+function hasRosettaSection(content, marker) {
+  return content.includes(marker);
+}
+async function setupAgentCommand(options) {
+  const cwd = process.cwd();
+  const rosettaPath = import_path7.default.join(cwd, "ROSETTA.md");
+  if (!import_fs7.default.existsSync(rosettaPath)) {
+    console.log(import_chalk7.default.yellow("ROSETTA.md not found."));
+    console.log();
+    console.log("Run " + import_chalk7.default.white("'rosetta init'") + " first to initialize Rosetta.");
+    return;
+  }
+  console.log(import_chalk7.default.cyan("Rosetta Agent Setup"));
+  console.log(import_chalk7.default.gray("\u2550".repeat(40)));
+  console.log();
+  const targetAgents = options.agent === "all" || !options.agent ? AGENT_CONFIGS : AGENT_CONFIGS.filter((a) => a.name.toLowerCase().includes(options.agent));
+  let updated = 0;
+  let skipped = 0;
+  let created = 0;
+  for (const agent of targetAgents) {
+    const existingFile = findExistingFile(agent.files, cwd);
+    const templateContent = loadTemplate(agent.template);
+    if (existingFile) {
+      const content = import_fs7.default.readFileSync(existingFile, "utf-8");
+      if (agent.sectionMarker && hasRosettaSection(content, agent.sectionMarker)) {
+        if (!options.force) {
+          console.log(import_chalk7.default.yellow("\u2298") + ` ${agent.name}: Rosetta section already exists (use --force to replace)`);
+          skipped++;
+          continue;
+        }
+        const lines = content.split("\n");
+        const sectionStart = lines.findIndex((l) => l.includes(agent.sectionMarker));
+        if (sectionStart !== -1) {
+          let sectionEnd = lines.length;
+          for (let i = sectionStart + 1; i < lines.length; i++) {
+            if (lines[i].match(/^## /) && !lines[i].includes("Rosetta")) {
+              sectionEnd = i;
+              break;
+            }
+          }
+          lines.splice(sectionStart, sectionEnd - sectionStart);
+          const newContent = lines.join("\n").trimEnd() + "\n\n" + templateContent;
+          import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
+          console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Updated ${import_path7.default.relative(cwd, existingFile)}`);
+          updated++;
+        }
+      } else if (agent.appendMode) {
+        const newContent = content.trimEnd() + "\n\n" + templateContent;
+        import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
+        console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Added Rosetta section to ${import_path7.default.relative(cwd, existingFile)}`);
+        updated++;
+      } else {
+        if (content.includes("ROSETTA.md")) {
+          console.log(import_chalk7.default.yellow("\u2298") + ` ${agent.name}: Already configured for Rosetta`);
+          skipped++;
+        } else {
+          const newContent = content.trimEnd() + "\n\n" + templateContent;
+          import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
+          console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Updated ${import_path7.default.relative(cwd, existingFile)}`);
+          updated++;
+        }
+      }
+    } else {
+      const targetFile = import_path7.default.join(cwd, agent.files[0]);
+      const targetDir = import_path7.default.dirname(targetFile);
+      if (!import_fs7.default.existsSync(targetDir)) {
+        import_fs7.default.mkdirSync(targetDir, { recursive: true });
+      }
+      import_fs7.default.writeFileSync(targetFile, templateContent, "utf-8");
+      console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Created ${agent.files[0]}`);
+      created++;
+    }
+  }
+  console.log();
+  console.log(import_chalk7.default.gray("\u2500".repeat(40)));
+  console.log(
+    `Summary: ${created > 0 ? import_chalk7.default.green(`${created} created`) : "0 created"}, ${updated > 0 ? import_chalk7.default.cyan(`${updated} updated`) : "0 updated"}, ${skipped > 0 ? import_chalk7.default.yellow(`${skipped} skipped`) : "0 skipped"}`
+  );
+  if (created > 0 || updated > 0) {
+    console.log();
+    console.log(import_chalk7.default.green("Agent configs are now Rosetta-aware!"));
+    console.log(import_chalk7.default.gray("Future agent sessions will automatically use Rosetta context."));
+  }
+}
+
+// package.json
+var package_default = {
+  name: "rosetta-context",
+  version: "1.3.0",
+  description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
+  main: "dist/index.js",
+  bin: {
+    rosetta: "./dist/cli/index.js"
+  },
+  scripts: {
+    build: "tsup",
+    dev: "tsup --watch",
+    start: "node dist/cli/index.js",
+    test: "vitest",
+    lint: "eslint src/",
+    typecheck: "tsc --noEmit"
+  },
+  keywords: [
+    "ai",
+    "agents",
+    "coding-assistant",
+    "documentation",
+    "context",
+    "claude",
+    "claude-code",
+    "codex",
+    "cursor",
+    "aider",
+    "copilot",
+    "llm",
+    "codebase",
+    "developer-tools"
+  ],
+  author: "Christian Johnson <cjohnson@metisos.com>",
+  license: "MIT",
+  repository: {
+    type: "git",
+    url: "git+https://github.com/metisos/Rosetta_Open_Source.git"
+  },
+  bugs: {
+    url: "https://github.com/metisos/Rosetta_Open_Source/issues"
+  },
+  homepage: "https://github.com/metisos/Rosetta_Open_Source#readme",
+  engines: {
+    node: ">=18.0.0"
+  },
+  files: [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  dependencies: {
+    chalk: "^4.1.2",
+    commander: "^12.1.0",
+    glob: "^10.3.10",
+    yaml: "^2.3.4"
+  },
+  devDependencies: {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    eslint: "^9.13.0",
+    "@types/node": "^20.10.0",
+    tsup: "^8.0.1",
+    typescript: "^5.3.2",
+    vitest: "^1.0.0"
+  }
+};
+
 // src/cli/index.ts
-var VERSION = "1.0.0";
+var VERSION = package_default.version;
 var program = new import_commander.Command();
 var banner = `
-${import_chalk7.default.cyan("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")}
-${import_chalk7.default.cyan("\u2502")}  ${import_chalk7.default.white("ROSETTA")} ${import_chalk7.default.gray("- Agent Codebase Understanding Protocol")}      ${import_chalk7.default.cyan("\u2502")}
-${import_chalk7.default.cyan("\u2502")}  ${import_chalk7.default.gray(`v${VERSION}`)}                                                 ${import_chalk7.default.cyan("\u2502")}
-${import_chalk7.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
+${import_chalk8.default.cyan("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")}
+${import_chalk8.default.cyan("\u2502")}  ${import_chalk8.default.white("ROSETTA")} ${import_chalk8.default.gray("- Agent Codebase Understanding Protocol")}      ${import_chalk8.default.cyan("\u2502")}
+${import_chalk8.default.cyan("\u2502")}  ${import_chalk8.default.gray(`v${VERSION}`)}                                                 ${import_chalk8.default.cyan("\u2502")}
+${import_chalk8.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
 `;
 program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner);
 program.command("init").description("Initialize Rosetta in a project").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").action(async (options) => {
@@ -921,18 +1236,21 @@ program.command("note <message>").description("Manually add an agent-style note"
 program.command("bootstrap").description("Output the Bootstrap Protocol for an agent to populate Rosetta").option("-o, --output <file>", "Write to file instead of stdout").action(async (options) => {
   await bootstrapCommand(options);
 });
+program.command("setup-agent").description("Configure agent instruction files (CLAUDE.md, .cursorrules, etc.) to use Rosetta").option("-a, --agent <agent>", "Target agent: claude, cursor, aider, or all (default: all)", "all").option("-f, --force", "Overwrite existing Rosetta sections").action(async (options) => {
+  await setupAgentCommand(options);
+});
 program.parse();
 if (!process.argv.slice(2).length) {
   console.log(banner);
-  console.log(import_chalk7.default.cyan("Quick Start:"));
+  console.log(import_chalk8.default.cyan("Quick Start:"));
   console.log();
-  console.log("  " + import_chalk7.default.white("rosetta init") + import_chalk7.default.gray("         Initialize Rosetta in your project"));
-  console.log("  " + import_chalk7.default.white("rosetta init -b") + import_chalk7.default.gray("      Initialize and get bootstrap prompt"));
-  console.log("  " + import_chalk7.default.white("rosetta status") + import_chalk7.default.gray("       Check documentation freshness"));
-  console.log("  " + import_chalk7.default.white("rosetta validate") + import_chalk7.default.gray("     Validate Rosetta file structure"));
+  console.log("  " + import_chalk8.default.white("rosetta init") + import_chalk8.default.gray("         Initialize Rosetta in your project"));
+  console.log("  " + import_chalk8.default.white("rosetta init -b") + import_chalk8.default.gray("      Initialize and get bootstrap prompt"));
+  console.log("  " + import_chalk8.default.white("rosetta status") + import_chalk8.default.gray("       Check documentation freshness"));
+  console.log("  " + import_chalk8.default.white("rosetta validate") + import_chalk8.default.gray("     Validate Rosetta file structure"));
   console.log();
-  console.log(import_chalk7.default.gray("Run ") + import_chalk7.default.white("rosetta --help") + import_chalk7.default.gray(" for all commands"));
+  console.log(import_chalk8.default.gray("Run ") + import_chalk8.default.white("rosetta --help") + import_chalk8.default.gray(" for all commands"));
   console.log();
-  console.log(import_chalk7.default.gray("Docs: https://github.com/metisos/rosetta"));
+  console.log(import_chalk8.default.gray("Docs: https://github.com/metisos/rosetta"));
 }
 //# sourceMappingURL=index.js.map

@@ -12,9 +12,11 @@ import {
   addModuleCommand,
   noteCommand,
   bootstrapCommand,
+  setupAgentCommand,
 } from './commands';
+import pkg from '../../package.json';
 
-const VERSION = '1.0.0';
+const VERSION = pkg.version;
 
 const program = new Command();
 
@@ -85,6 +87,16 @@ program
   .option('-o, --output <file>', 'Write to file instead of stdout')
   .action(async (options) => {
     await bootstrapCommand(options);
+  });
+
+// rosetta setup-agent
+program
+  .command('setup-agent')
+  .description('Configure agent instruction files (CLAUDE.md, .cursorrules, etc.) to use Rosetta')
+  .option('-a, --agent <agent>', 'Target agent: claude, cursor, aider, or all (default: all)', 'all')
+  .option('-f, --force', 'Overwrite existing Rosetta sections')
+  .action(async (options) => {
+    await setupAgentCommand(options);
   });
 
 // Parse and execute

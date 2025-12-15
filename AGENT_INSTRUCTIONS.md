@@ -211,6 +211,78 @@ ignore:
 modules: {}
 ```
 
+### Step 4: Update Agent Instruction Files (Critical!)
+
+This step makes Rosetta **self-propagating**. Without it, future sessions won't know to use Rosetta.
+
+Check for and update these agent configuration files:
+
+**For Claude Code** (`.claude/CLAUDE.md` or `CLAUDE.md`):
+```markdown
+## Rosetta Protocol
+
+This project uses Rosetta for persistent AI context.
+
+**On session start:**
+1. Read ROSETTA.md immediately for project context
+2. Check Module Index and load relevant .rosetta/modules/ files
+3. Review .rosetta/notes.md for recent discoveries
+
+**During work:**
+- Follow conventions documented in ROSETTA.md
+- Check Gotchas before modifying unfamiliar areas
+- Reference Key Patterns for consistent code style
+
+**Before session end:**
+- Append valuable discoveries to .rosetta/notes.md
+- Format: ### YYYY-MM-DD | claude
+- Keep notes actionable and non-obvious
+
+**If ROSETTA.md doesn't exist:**
+- Run `rosetta init` or create it by analyzing the codebase
+- See: https://github.com/metisos/Rosetta_Open_Source
+```
+
+**For Cursor** (`.cursorrules`):
+```markdown
+## Rosetta Protocol
+
+This codebase uses Rosetta for AI context management.
+
+ALWAYS read ROSETTA.md first for:
+- Project architecture and tech stack
+- Coding conventions and patterns
+- Known gotchas and warnings
+
+Load relevant modules from .rosetta/modules/ based on your task.
+Append learnings to .rosetta/notes.md before ending session.
+
+If ROSETTA.md doesn't exist, create it by analyzing the codebase.
+```
+
+**For Aider** (`.aider.conf.yml`):
+```yaml
+read:
+  - ROSETTA.md
+  - .rosetta/notes.md
+```
+
+**For other agents:** Add similar instructions to their configuration files.
+
+### Why This Step Matters
+
+```
+Without Step 4:
+  Session 1: Agent creates Rosetta files
+  Session 2: New agent doesn't know Rosetta exists → context lost
+  Session 3: Same problem repeats
+
+With Step 4:
+  Session 1: Agent creates Rosetta + updates CLAUDE.md/.cursorrules
+  Session 2: New agent reads config → loads Rosetta → instant context
+  Session 3: Knowledge accumulates across all sessions
+```
+
 ## Creating Module Files
 
 When you deeply analyze a subsystem, create a module file:

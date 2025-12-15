@@ -85,6 +85,9 @@ declare const TEMPLATES: {
     readonly NOTES: "notes.md";
     readonly CONFIG: "config.yml";
     readonly BOOTSTRAP: "bootstrap-prompt.md";
+    readonly AGENT_CONFIG_CLAUDE: "agent-config-claude.md";
+    readonly AGENT_CONFIG_CURSOR: "agent-config-cursor.md";
+    readonly AGENT_CONFIG_AIDER: "agent-config-aider.yml";
 };
 
 /**

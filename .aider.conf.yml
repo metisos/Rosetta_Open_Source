@@ -1,0 +1,4 @@
+# Rosetta Protocol - Auto-load context files
+read:
+  - ROSETTA.md
+  - .rosetta/notes.md
