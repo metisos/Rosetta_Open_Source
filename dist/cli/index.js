@@ -1202,7 +1202,7 @@ async function bootstrapCommand(options) {
 // package.json
 var package_default = {
   name: "rosetta-context",
-  version: "1.3.2",
+  version: "1.3.3",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
   bin: {

@@ -54,19 +54,45 @@ Session 4: All agents benefit from accumulated knowledge
 
 ## How It Works
 
-### For Developers
+### For New Projects
 
-1. **Initialize Rosetta** in your project:
-   ```bash
-   npx rosetta-context init
-   ```
+```bash
+npx rosetta-context init --lite
+```
 
-2. **Let your AI agent populate it** by asking:
-   ```
-   "Analyze this codebase and populate ROSETTA.md"
-   ```
+This creates agent config files (CLAUDE.md, .cursorrules) that tell agents:
+- Wait until the project has patterns worth documenting
+- Create ROSETTA.md when first feature is done or gotcha is discovered
+- Self-manage documentation going forward
 
-3. **That's it.** Future AI sessions will automatically benefit.
+### For Existing Projects
+
+```bash
+npx rosetta-context init
+npx rosetta-context setup-agent
+```
+
+Then ask your AI agent: *"Analyze this codebase and populate ROSETTA.md"*
+
+### Self-Propagating Workflow
+
+Once set up, Rosetta maintains itself:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Agent reads CLAUDE.md/.cursorrules                     │
+│  → Sees "Read ROSETTA.md first"                         │
+│  → Loads context instantly (~1500 tokens)               │
+│  → Checks staleness, updates if needed                  │
+│  → Appends learnings to notes.md                        │
+└─────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Next session benefits from accumulated knowledge       │
+│  No manual maintenance required                         │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### For AI Agents
 
@@ -166,14 +192,32 @@ npm install -g rosetta-context
 ### Commands
 
 ```bash
-rosetta init              # Initialize Rosetta files
+# Full initialization (existing projects with code)
+rosetta init              # Create ROSETTA.md + .rosetta/ directory
 rosetta init --bootstrap  # Initialize + get AI population prompt
-rosetta status            # Check documentation freshness
+
+# Lite initialization (new/empty projects)
+rosetta init --lite       # Only create agent configs, no ROSETTA.md yet
+
+# Agent configuration
+rosetta setup-agent       # Configure CLAUDE.md, .cursorrules, .aider.conf.yml
+rosetta setup-agent -a claude  # Configure specific agent only
+
+# Maintenance
+rosetta status            # Check documentation freshness/staleness
 rosetta validate          # Validate structure
 rosetta add-module <name> # Create module file
 rosetta note "message"    # Add a note manually
 rosetta bootstrap         # Output bootstrap prompt
 ```
+
+### New Project vs Existing Project
+
+| Scenario | Command | What it creates |
+|----------|---------|-----------------|
+| **New project** (no code yet) | `rosetta init --lite` | Agent configs only - agents will create ROSETTA.md when ready |
+| **Existing project** (has code) | `rosetta init` | Full Rosetta setup - ROSETTA.md + .rosetta/ |
+| **After init** | `rosetta setup-agent` | Configures CLAUDE.md, .cursorrules, .aider.conf.yml |
 
 ### Quality Gates
 
@@ -213,41 +257,60 @@ const modules = parseModuleIndex(content);
 
 ## Integration Examples
 
-### Claude Code (CLAUDE.md)
+Run `rosetta setup-agent` to automatically create these files, or add manually:
+
+### Claude Code (.claude/CLAUDE.md)
 
 ```markdown
 ## Rosetta Protocol
 
-This project uses Rosetta for AI context management.
+This project uses Rosetta for persistent AI context.
 
-On session start:
-1. Read ROSETTA.md for project understanding
-2. Check .rosetta/modules/ for relevant deep-dives
+**On session start:**
+1. Read ROSETTA.md immediately for project context
+2. Check `<!-- rosetta:last-updated:DATE -->` for staleness (>30 days = review needed)
+3. Load relevant .rosetta/modules/ files
+4. Review .rosetta/notes.md for recent discoveries
 
-During work:
-- Reference conventions before writing code
-- Check gotchas before modifying unfamiliar areas
+**During work:**
+- Follow conventions documented in ROSETTA.md
+- Check Gotchas before modifying unfamiliar areas
+- If you notice outdated info, UPDATE ROSETTA.md and bump last-updated date
 
-Before session end:
-- Add discoveries to .rosetta/notes.md
+**Before session end:**
+- Append discoveries to .rosetta/notes.md (format: ### YYYY-MM-DD | claude)
+
+**If ROSETTA.md doesn't exist:**
+- New/empty project → Wait until patterns emerge
+- Established project → Create it by analyzing the codebase
 ```
 
 ### Cursor (.cursorrules)
 
 ```markdown
-This codebase uses Rosetta for AI context.
+## Rosetta Protocol
 
-Always read ROSETTA.md first for:
-- Project architecture and tech stack
-- Coding conventions and patterns
-- Known gotchas and warnings
+This codebase uses Rosetta for AI context management.
 
-Append learnings to .rosetta/notes.md
+**On session start:**
+- ALWAYS read ROSETTA.md first
+- Check staleness via last-updated metadata
+- Load relevant modules from .rosetta/modules/
+
+**During work:**
+- Follow conventions in ROSETTA.md
+- Update outdated sections when you notice them
+
+**Before session end:**
+- Append learnings to .rosetta/notes.md
+
+**Staleness:** <30 days=fresh, 30-90=review, >90=verify
 ```
 
 ### Aider (.aider.conf.yml)
 
 ```yaml
+# Rosetta Protocol - Auto-load context files
 read:
   - ROSETTA.md
   - .rosetta/notes.md
@@ -288,6 +351,25 @@ Rosetta is designed for minimal context consumption:
 **Typical load:** ~1500 tokens (root + 1 relevant module)
 
 Compare to loading an entire codebase: 50,000-500,000+ tokens.
+
+## Staleness & Maintenance
+
+Rosetta tracks freshness via metadata comments:
+
+```markdown
+<!-- rosetta:last-updated:2025-01-15 -->
+<!-- rosetta:last-verified:2025-01-15 -->
+```
+
+Agents are instructed to check staleness on session start:
+
+| Age | Status | Action |
+|-----|--------|--------|
+| <30 days | Fresh | Trust the content |
+| 30-90 days | Review needed | Verify sections relevant to task |
+| >90 days | Critical | Verify before relying on it |
+
+**Agents update Rosetta as they work** - if they notice incorrect or outdated information, they fix it and bump the `last-updated` date. This keeps documentation alive without human intervention.
 
 ### What to Include
 
