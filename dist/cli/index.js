@@ -338,18 +338,29 @@ This project uses Rosetta for persistent AI context.
 
 **On session start:**
 1. Read ROSETTA.md immediately for project context
-2. Check Module Index and load relevant .rosetta/modules/ files
-3. Review .rosetta/notes.md for recent discoveries
+2. Check the \`<!-- rosetta:last-updated:DATE -->\` metadata for staleness (>30 days = review needed)
+3. Check Module Index and load relevant .rosetta/modules/ files
+4. Review .rosetta/notes.md for recent discoveries
 
 **During work:**
 - Follow conventions documented in ROSETTA.md
 - Check Gotchas before modifying unfamiliar areas
 - Reference Key Patterns for consistent code style
+- If you notice ROSETTA.md is outdated or incorrect, UPDATE IT:
+  - Fix incorrect information immediately
+  - Add new patterns you discover
+  - Update the \`<!-- rosetta:last-updated:DATE -->\` comment
 
 **Before session end:**
 - Append valuable discoveries to .rosetta/notes.md
 - Format: ### YYYY-MM-DD | claude
 - Keep notes actionable and non-obvious
+- If you made significant changes to the codebase, check if ROSETTA.md needs updating
+
+**Staleness guide:**
+- <30 days: Fresh, trust the content
+- 30-90 days: Review sections relevant to your work
+- >90 days: Verify critical sections before relying on them
 
 **If ROSETTA.md doesn't exist:**
 - Run \`rosetta init\` or create it by analyzing the codebase
@@ -359,13 +370,21 @@ This project uses Rosetta for persistent AI context.
 
 This codebase uses Rosetta for AI context management.
 
-ALWAYS read ROSETTA.md first for:
-- Project architecture and tech stack
-- Coding conventions and patterns
-- Known gotchas and warnings
+**On session start:**
+- ALWAYS read ROSETTA.md first for project context
+- Check \`<!-- rosetta:last-updated:DATE -->\` - if >30 days old, verify critical sections
+- Load relevant modules from .rosetta/modules/ based on your task
 
-Load relevant modules from .rosetta/modules/ based on your task.
-Append learnings to .rosetta/notes.md before ending session.
+**During work:**
+- Follow conventions and patterns in ROSETTA.md
+- Check Gotchas before modifying unfamiliar code
+- If you notice outdated/incorrect info in ROSETTA.md, UPDATE IT and bump the last-updated date
+
+**Before session end:**
+- Append learnings to .rosetta/notes.md (format: ### YYYY-MM-DD | cursor)
+- If you changed the codebase significantly, update ROSETTA.md
+
+**Staleness:** <30 days=fresh, 30-90=review, >90=verify before trusting
 
 If ROSETTA.md doesn't exist, create it by analyzing the codebase.
 See: https://github.com/metisos/Rosetta_Open_Source
@@ -1143,7 +1162,7 @@ async function setupAgentCommand(options) {
 // package.json
 var package_default = {
   name: "rosetta-context",
-  version: "1.3.0",
+  version: "1.3.1",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
   bin: {

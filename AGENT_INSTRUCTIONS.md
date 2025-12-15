@@ -28,10 +28,19 @@ When you begin working on a codebase:
    - Check Gotchas before making changes
    - Review recent Agent Notes for session-specific context
 
-3. **Load relevant modules** from `.rosetta/modules/`:
+3. **Check staleness** via `<!-- rosetta:last-updated:DATE -->`:
+   ```
+   Days since last update:
+   ├── <30 days  → Fresh. Trust the content.
+   ├── 30-90 days → Review sections relevant to your task.
+   └── >90 days  → Verify critical info before relying on it.
+   ```
+
+4. **Load relevant modules** from `.rosetta/modules/`:
    - Check the Module Index table in ROSETTA.md
    - Load modules matching your current task
    - Example: Working on auth? Load `auth.md`
+   - Check module `<!-- rosetta:last-verified:DATE -->` for staleness
 
 ### During Work
 
@@ -57,11 +66,17 @@ As you work on the codebase:
    - "This is a React project" (obvious)
    - "I modified the login page" (too specific to session)
 
-3. **Update ROSETTA.md** if you notice:
+3. **Update ROSETTA.md** if you notice it's outdated or incorrect:
    - Tech stack has changed
    - New architectural patterns emerged
    - Conventions have evolved
    - New gotchas discovered
+   - **Always update `<!-- rosetta:last-updated:DATE -->` when you modify ROSETTA.md**
+
+4. **Update module files** if you work deeply in an area:
+   - Fix incorrect information
+   - Add new patterns or gotchas you discover
+   - Update `<!-- rosetta:last-verified:DATE -->` to today's date
 
 ### Before Session End
 
@@ -77,6 +92,12 @@ Before completing your session:
 2. **Do not duplicate** information already in ROSETTA.md or existing notes
 
 3. **Keep notes actionable** - future agents should benefit from them
+
+4. **Check if ROSETTA.md needs updating** after significant work:
+   - Did you change the architecture or add major features?
+   - Did you discover new patterns or gotchas?
+   - Did you notice incorrect information while working?
+   - If yes → Update ROSETTA.md and bump `last-updated` date
 
 ## Creating Rosetta
 
