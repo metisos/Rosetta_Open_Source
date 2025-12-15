@@ -28,9 +28,9 @@ var import_commander = require("commander");
 var import_chalk8 = __toESM(require("chalk"));
 
 // src/cli/commands/init.ts
-var import_fs = __toESM(require("fs"));
-var import_path = __toESM(require("path"));
-var import_chalk = __toESM(require("chalk"));
+var import_fs2 = __toESM(require("fs"));
+var import_path2 = __toESM(require("path"));
+var import_chalk2 = __toESM(require("chalk"));
 
 // src/cli/utils/templates.ts
 var EMBEDDED_TEMPLATES = {
@@ -363,8 +363,22 @@ This project uses Rosetta for persistent AI context.
 - >90 days: Verify critical sections before relying on them
 
 **If ROSETTA.md doesn't exist:**
-- Run \`rosetta init\` or create it by analyzing the codebase
-- See: https://github.com/metisos/Rosetta_Open_Source
+Check if the project is ready for documentation:
+\`\`\`
+Is project ready?
+\u251C\u2500\u2500 New/empty project with no patterns yet \u2192 WAIT
+\u2502   \u2514\u2500\u2500 Just start working, create ROSETTA.md later
+\u2502
+\u2514\u2500\u2500 Project has substance \u2192 CREATE ROSETTA.md now
+    Triggers:
+    \u2022 First feature/module is complete
+    \u2022 Directory structure is established
+    \u2022 You've discovered a non-obvious gotcha
+    \u2022 Patterns are starting to emerge
+\`\`\`
+
+To create: Run \`rosetta init\` OR analyze the codebase and create ROSETTA.md manually.
+See: https://github.com/metisos/Rosetta_Open_Source
 `,
   "agent-config-cursor.md": `## Rosetta Protocol
 
@@ -386,7 +400,11 @@ This codebase uses Rosetta for AI context management.
 
 **Staleness:** <30 days=fresh, 30-90=review, >90=verify before trusting
 
-If ROSETTA.md doesn't exist, create it by analyzing the codebase.
+**If ROSETTA.md doesn't exist:**
+- New/empty project \u2192 Wait until patterns emerge, then create it
+- Established project \u2192 Create ROSETTA.md by analyzing the codebase
+- Triggers: first feature done, directory structure set, gotcha discovered
+
 See: https://github.com/metisos/Rosetta_Open_Source
 `,
   "agent-config-aider.yml": `# Rosetta Protocol - Auto-load context files
@@ -423,78 +441,221 @@ var TEMPLATES = {
   AGENT_CONFIG_AIDER: "agent-config-aider.yml"
 };
 
+// src/cli/commands/setup-agent.ts
+var import_fs = __toESM(require("fs"));
+var import_path = __toESM(require("path"));
+var import_chalk = __toESM(require("chalk"));
+var AGENT_CONFIGS = [
+  {
+    name: "Claude Code",
+    files: [".claude/CLAUDE.md", "CLAUDE.md"],
+    template: TEMPLATES.AGENT_CONFIG_CLAUDE,
+    appendMode: true,
+    sectionMarker: "## Rosetta Protocol"
+  },
+  {
+    name: "Cursor",
+    files: [".cursorrules"],
+    template: TEMPLATES.AGENT_CONFIG_CURSOR,
+    appendMode: true,
+    sectionMarker: "## Rosetta Protocol"
+  },
+  {
+    name: "Aider",
+    files: [".aider.conf.yml"],
+    template: TEMPLATES.AGENT_CONFIG_AIDER,
+    appendMode: false
+    // YAML needs special handling
+  }
+];
+function findExistingFile(files, cwd) {
+  for (const file of files) {
+    const filePath = import_path.default.join(cwd, file);
+    if (import_fs.default.existsSync(filePath)) {
+      return filePath;
+    }
+  }
+  return null;
+}
+function hasRosettaSection(content, marker) {
+  return content.includes(marker);
+}
+async function setupAgentCommand(options) {
+  const cwd = process.cwd();
+  const rosettaPath = import_path.default.join(cwd, "ROSETTA.md");
+  if (!options.skipRosettaCheck && !import_fs.default.existsSync(rosettaPath)) {
+    console.log(import_chalk.default.yellow("ROSETTA.md not found."));
+    console.log();
+    console.log("Run " + import_chalk.default.white("'rosetta init'") + " first to initialize Rosetta.");
+    return;
+  }
+  console.log(import_chalk.default.cyan("Rosetta Agent Setup"));
+  console.log(import_chalk.default.gray("\u2550".repeat(40)));
+  console.log();
+  const targetAgents = options.agent === "all" || !options.agent ? AGENT_CONFIGS : AGENT_CONFIGS.filter((a) => a.name.toLowerCase().includes(options.agent));
+  let updated = 0;
+  let skipped = 0;
+  let created = 0;
+  for (const agent of targetAgents) {
+    const existingFile = findExistingFile(agent.files, cwd);
+    const templateContent = loadTemplate(agent.template);
+    if (existingFile) {
+      const content = import_fs.default.readFileSync(existingFile, "utf-8");
+      if (agent.sectionMarker && hasRosettaSection(content, agent.sectionMarker)) {
+        if (!options.force) {
+          console.log(import_chalk.default.yellow("\u2298") + ` ${agent.name}: Rosetta section already exists (use --force to replace)`);
+          skipped++;
+          continue;
+        }
+        const lines = content.split("\n");
+        const sectionStart = lines.findIndex((l) => l.includes(agent.sectionMarker));
+        if (sectionStart !== -1) {
+          let sectionEnd = lines.length;
+          for (let i = sectionStart + 1; i < lines.length; i++) {
+            if (lines[i].match(/^## /) && !lines[i].includes("Rosetta")) {
+              sectionEnd = i;
+              break;
+            }
+          }
+          lines.splice(sectionStart, sectionEnd - sectionStart);
+          const newContent = lines.join("\n").trimEnd() + "\n\n" + templateContent;
+          import_fs.default.writeFileSync(existingFile, newContent, "utf-8");
+          console.log(import_chalk.default.green("\u2713") + ` ${agent.name}: Updated ${import_path.default.relative(cwd, existingFile)}`);
+          updated++;
+        }
+      } else if (agent.appendMode) {
+        const newContent = content.trimEnd() + "\n\n" + templateContent;
+        import_fs.default.writeFileSync(existingFile, newContent, "utf-8");
+        console.log(import_chalk.default.green("\u2713") + ` ${agent.name}: Added Rosetta section to ${import_path.default.relative(cwd, existingFile)}`);
+        updated++;
+      } else {
+        if (content.includes("ROSETTA.md")) {
+          console.log(import_chalk.default.yellow("\u2298") + ` ${agent.name}: Already configured for Rosetta`);
+          skipped++;
+        } else {
+          const newContent = content.trimEnd() + "\n\n" + templateContent;
+          import_fs.default.writeFileSync(existingFile, newContent, "utf-8");
+          console.log(import_chalk.default.green("\u2713") + ` ${agent.name}: Updated ${import_path.default.relative(cwd, existingFile)}`);
+          updated++;
+        }
+      }
+    } else {
+      const targetFile = import_path.default.join(cwd, agent.files[0]);
+      const targetDir = import_path.default.dirname(targetFile);
+      if (!import_fs.default.existsSync(targetDir)) {
+        import_fs.default.mkdirSync(targetDir, { recursive: true });
+      }
+      import_fs.default.writeFileSync(targetFile, templateContent, "utf-8");
+      console.log(import_chalk.default.green("\u2713") + ` ${agent.name}: Created ${agent.files[0]}`);
+      created++;
+    }
+  }
+  console.log();
+  console.log(import_chalk.default.gray("\u2500".repeat(40)));
+  console.log(
+    `Summary: ${created > 0 ? import_chalk.default.green(`${created} created`) : "0 created"}, ${updated > 0 ? import_chalk.default.cyan(`${updated} updated`) : "0 updated"}, ${skipped > 0 ? import_chalk.default.yellow(`${skipped} skipped`) : "0 skipped"}`
+  );
+  if (created > 0 || updated > 0) {
+    console.log();
+    console.log(import_chalk.default.green("Agent configs are now Rosetta-aware!"));
+    console.log(import_chalk.default.gray("Future agent sessions will automatically use Rosetta context."));
+  }
+}
+
 // src/cli/commands/init.ts
 async function initCommand(options) {
   const cwd = process.cwd();
-  const rosettaPath = import_path.default.join(cwd, "ROSETTA.md");
-  const rosettaDir = import_path.default.join(cwd, ".rosetta");
-  if (import_fs.default.existsSync(rosettaPath) && !options.force) {
-    console.log(import_chalk.default.yellow("ROSETTA.md already exists. Use --force to overwrite."));
+  if (options.lite) {
+    console.log(import_chalk2.default.cyan("Rosetta Lite Init"));
+    console.log(import_chalk2.default.gray("Setting up agent configs for a new project..."));
+    console.log();
+    await setupAgentCommand({ agent: "all", force: options.force, skipRosettaCheck: true });
+    console.log();
+    console.log(import_chalk2.default.cyan("Lite init complete!"));
+    console.log();
+    console.log(import_chalk2.default.white("What happens next:"));
+    console.log("  \u2022 Agents will see instructions to create ROSETTA.md");
+    console.log("  \u2022 They'll wait until your project has enough to document");
+    console.log("  \u2022 When ready, they'll initialize full Rosetta automatically");
+    console.log();
+    console.log(import_chalk2.default.gray("Triggers for full init:"));
+    console.log("  \u2022 First feature/module complete");
+    console.log("  \u2022 Clear directory structure established");
+    console.log("  \u2022 Patterns starting to emerge");
+    console.log("  \u2022 First non-obvious gotcha discovered");
+    console.log();
+    console.log(import_chalk2.default.gray("Or run ") + import_chalk2.default.white("rosetta init") + import_chalk2.default.gray(" manually when ready."));
     return;
   }
-  const modulesDir = import_path.default.join(rosettaDir, "modules");
-  if (!import_fs.default.existsSync(rosettaDir)) {
-    import_fs.default.mkdirSync(rosettaDir, { recursive: true });
+  const rosettaPath = import_path2.default.join(cwd, "ROSETTA.md");
+  const rosettaDir = import_path2.default.join(cwd, ".rosetta");
+  if (import_fs2.default.existsSync(rosettaPath) && !options.force) {
+    console.log(import_chalk2.default.yellow("ROSETTA.md already exists. Use --force to overwrite."));
+    return;
   }
-  if (!import_fs.default.existsSync(modulesDir)) {
-    import_fs.default.mkdirSync(modulesDir, { recursive: true });
+  const modulesDir = import_path2.default.join(rosettaDir, "modules");
+  if (!import_fs2.default.existsSync(rosettaDir)) {
+    import_fs2.default.mkdirSync(rosettaDir, { recursive: true });
+  }
+  if (!import_fs2.default.existsSync(modulesDir)) {
+    import_fs2.default.mkdirSync(modulesDir, { recursive: true });
   }
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   try {
     const templateName = options.template === "nextjs" ? "ROSETTA.md" : TEMPLATES.ROSETTA_MINIMAL;
     const rosettaTemplate = loadTemplate(templateName);
     const rosettaContent = renderTemplate(rosettaTemplate, { DATE: today });
-    import_fs.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
-    console.log(import_chalk.default.green("\u2713") + " Created ROSETTA.md");
+    import_fs2.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
+    console.log(import_chalk2.default.green("\u2713") + " Created ROSETTA.md");
   } catch (error) {
-    console.log(import_chalk.default.red("\u2717") + " Failed to create ROSETTA.md");
+    console.log(import_chalk2.default.red("\u2717") + " Failed to create ROSETTA.md");
     console.error(error);
     return;
   }
   try {
     const notesTemplate = loadTemplate(TEMPLATES.NOTES);
     const notesContent = renderTemplate(notesTemplate, { DATE: today });
-    import_fs.default.writeFileSync(import_path.default.join(rosettaDir, "notes.md"), notesContent, "utf-8");
-    console.log(import_chalk.default.green("\u2713") + " Created .rosetta/notes.md");
+    import_fs2.default.writeFileSync(import_path2.default.join(rosettaDir, "notes.md"), notesContent, "utf-8");
+    console.log(import_chalk2.default.green("\u2713") + " Created .rosetta/notes.md");
   } catch (error) {
-    console.log(import_chalk.default.red("\u2717") + " Failed to create .rosetta/notes.md");
+    console.log(import_chalk2.default.red("\u2717") + " Failed to create .rosetta/notes.md");
   }
   try {
     const configTemplate = loadTemplate(TEMPLATES.CONFIG);
-    import_fs.default.writeFileSync(import_path.default.join(rosettaDir, "config.yml"), configTemplate, "utf-8");
-    console.log(import_chalk.default.green("\u2713") + " Created .rosetta/config.yml");
+    import_fs2.default.writeFileSync(import_path2.default.join(rosettaDir, "config.yml"), configTemplate, "utf-8");
+    console.log(import_chalk2.default.green("\u2713") + " Created .rosetta/config.yml");
   } catch (error) {
-    console.log(import_chalk.default.red("\u2717") + " Failed to create .rosetta/config.yml");
+    console.log(import_chalk2.default.red("\u2717") + " Failed to create .rosetta/config.yml");
   }
-  import_fs.default.writeFileSync(import_path.default.join(modulesDir, ".gitkeep"), "", "utf-8");
-  console.log(import_chalk.default.green("\u2713") + " Created .rosetta/modules/");
+  import_fs2.default.writeFileSync(import_path2.default.join(modulesDir, ".gitkeep"), "", "utf-8");
+  console.log(import_chalk2.default.green("\u2713") + " Created .rosetta/modules/");
   console.log();
-  console.log(import_chalk.default.cyan("Rosetta initialized!") + " Next steps:");
+  console.log(import_chalk2.default.cyan("Rosetta initialized!") + " Next steps:");
   console.log();
-  console.log("  1. Edit " + import_chalk.default.white("ROSETTA.md") + " to describe your project");
-  console.log("  2. Run " + import_chalk.default.white("'rosetta add-module <name>'") + " to add module docs");
-  console.log("  3. Add Rosetta protocol to your agent prompts");
+  console.log("  1. Edit " + import_chalk2.default.white("ROSETTA.md") + " to describe your project");
+  console.log("  2. Run " + import_chalk2.default.white("'rosetta add-module <name>'") + " to add module docs");
+  console.log("  3. Run " + import_chalk2.default.white("'rosetta setup-agent'") + " to configure agent files");
   console.log();
   if (options.bootstrap) {
-    console.log(import_chalk.default.yellow("\u2500".repeat(60)));
+    console.log(import_chalk2.default.yellow("\u2500".repeat(60)));
     console.log();
-    console.log(import_chalk.default.cyan("Bootstrap Protocol"));
-    console.log(import_chalk.default.gray("Copy and paste the following into your AI coding agent:"));
+    console.log(import_chalk2.default.cyan("Bootstrap Protocol"));
+    console.log(import_chalk2.default.gray("Copy and paste the following into your AI coding agent:"));
     console.log();
     try {
       const bootstrapPrompt = loadTemplate(TEMPLATES.BOOTSTRAP);
       console.log(bootstrapPrompt);
     } catch {
-      console.log(import_chalk.default.red("Failed to load bootstrap prompt"));
+      console.log(import_chalk2.default.red("Failed to load bootstrap prompt"));
     }
   }
-  console.log(import_chalk.default.gray("Docs: https://github.com/metisos/rosetta"));
+  console.log(import_chalk2.default.gray("Docs: https://github.com/metisos/rosetta"));
 }
 
 // src/cli/commands/validate.ts
-var import_fs2 = __toESM(require("fs"));
-var import_path2 = __toESM(require("path"));
-var import_chalk2 = __toESM(require("chalk"));
+var import_fs3 = __toESM(require("fs"));
+var import_path3 = __toESM(require("path"));
+var import_chalk3 = __toESM(require("chalk"));
 
 // src/cli/utils/parser.ts
 var REQUIRED_SECTIONS = [
@@ -646,83 +807,83 @@ function parseAgentNotes(content) {
 // src/cli/commands/validate.ts
 async function validateCommand(options) {
   const targetPath = options.path || process.cwd();
-  const rosettaPath = import_path2.default.join(targetPath, "ROSETTA.md");
-  const rosettaDir = import_path2.default.join(targetPath, ".rosetta");
+  const rosettaPath = import_path3.default.join(targetPath, "ROSETTA.md");
+  const rosettaDir = import_path3.default.join(targetPath, ".rosetta");
   const result = {
     errors: [],
     warnings: []
   };
-  console.log(import_chalk2.default.cyan("Rosetta Validation Report"));
-  console.log(import_chalk2.default.gray("\u2550".repeat(40)));
+  console.log(import_chalk3.default.cyan("Rosetta Validation Report"));
+  console.log(import_chalk3.default.gray("\u2550".repeat(40)));
   console.log();
-  if (!import_fs2.default.existsSync(rosettaPath)) {
-    console.log(import_chalk2.default.red("\u2717") + " ROSETTA.md not found");
+  if (!import_fs3.default.existsSync(rosettaPath)) {
+    console.log(import_chalk3.default.red("\u2717") + " ROSETTA.md not found");
     console.log();
-    console.log(import_chalk2.default.yellow("Run 'rosetta init' to initialize Rosetta"));
+    console.log(import_chalk3.default.yellow("Run 'rosetta init' to initialize Rosetta"));
     return;
   }
-  console.log(import_chalk2.default.white("ROSETTA.md"));
-  const rosettaContent = import_fs2.default.readFileSync(rosettaPath, "utf-8");
+  console.log(import_chalk3.default.white("ROSETTA.md"));
+  const rosettaContent = import_fs3.default.readFileSync(rosettaPath, "utf-8");
   const parsed = parseRosettaFile(rosettaContent);
   const sectionValidation = validateSections(parsed, REQUIRED_SECTIONS);
   for (const section of sectionValidation.found) {
-    console.log(import_chalk2.default.green("  \u2713") + ` ${section} section present`);
+    console.log(import_chalk3.default.green("  \u2713") + ` ${section} section present`);
   }
   for (const section of sectionValidation.missing) {
-    console.log(import_chalk2.default.red("  \u2717") + ` ${section} section missing`);
+    console.log(import_chalk3.default.red("  \u2717") + ` ${section} section missing`);
     result.errors.push(`Missing section: ${section}`);
   }
   if (parsed.metadata.lastUpdated) {
     const lastUpdated = new Date(parsed.metadata.lastUpdated);
     const daysSince = Math.floor((Date.now() - lastUpdated.getTime()) / (1e3 * 60 * 60 * 24));
     if (daysSince > 30) {
-      console.log(import_chalk2.default.yellow("  \u26A0") + ` Last updated ${daysSince} days ago`);
+      console.log(import_chalk3.default.yellow("  \u26A0") + ` Last updated ${daysSince} days ago`);
       result.warnings.push(`ROSETTA.md last updated ${daysSince} days ago`);
     }
   } else {
-    console.log(import_chalk2.default.yellow("  \u26A0") + " No last-updated metadata found");
+    console.log(import_chalk3.default.yellow("  \u26A0") + " No last-updated metadata found");
     result.warnings.push("No last-updated metadata in ROSETTA.md");
   }
   console.log();
   const moduleIndex = parseModuleIndex(rosettaContent);
-  console.log(import_chalk2.default.white("Module Index"));
+  console.log(import_chalk3.default.white("Module Index"));
   if (moduleIndex.length === 0) {
-    console.log(import_chalk2.default.yellow("  \u26A0") + " No modules defined in index");
+    console.log(import_chalk3.default.yellow("  \u26A0") + " No modules defined in index");
     result.warnings.push("No modules defined in Module Index");
   } else {
     for (const module2 of moduleIndex) {
       if (!module2.module || !module2.path) continue;
-      const modulePath = import_path2.default.join(targetPath, module2.path);
-      if (import_fs2.default.existsSync(modulePath)) {
-        console.log(import_chalk2.default.green("  \u2713") + ` ${module2.module}.md exists`);
+      const modulePath = import_path3.default.join(targetPath, module2.path);
+      if (import_fs3.default.existsSync(modulePath)) {
+        console.log(import_chalk3.default.green("  \u2713") + ` ${module2.module}.md exists`);
       } else {
-        console.log(import_chalk2.default.red("  \u2717") + ` ${module2.module}.md missing (${module2.path})`);
+        console.log(import_chalk3.default.red("  \u2717") + ` ${module2.module}.md missing (${module2.path})`);
         result.errors.push(`Module file missing: ${module2.path}`);
       }
     }
   }
   console.log();
-  const modulesDir = import_path2.default.join(rosettaDir, "modules");
-  if (import_fs2.default.existsSync(modulesDir)) {
-    const moduleFiles = import_fs2.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
+  const modulesDir = import_path3.default.join(rosettaDir, "modules");
+  if (import_fs3.default.existsSync(modulesDir)) {
+    const moduleFiles = import_fs3.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
     if (moduleFiles.length > 0) {
-      console.log(import_chalk2.default.white("Module Files"));
+      console.log(import_chalk3.default.white("Module Files"));
       for (const moduleFile of moduleFiles) {
-        const modulePath = import_path2.default.join(modulesDir, moduleFile);
-        const moduleContent = import_fs2.default.readFileSync(modulePath, "utf-8");
+        const modulePath = import_path3.default.join(modulesDir, moduleFile);
+        const moduleContent = import_fs3.default.readFileSync(modulePath, "utf-8");
         const moduleParsed = parseRosettaFile(moduleContent);
         const moduleValidation = validateSections(moduleParsed, REQUIRED_MODULE_SECTIONS);
         if (moduleValidation.valid) {
-          console.log(import_chalk2.default.green("  \u2713") + ` ${moduleFile} structure valid`);
+          console.log(import_chalk3.default.green("  \u2713") + ` ${moduleFile} structure valid`);
         } else {
-          console.log(import_chalk2.default.red("  \u2717") + ` ${moduleFile} missing sections: ${moduleValidation.missing.join(", ")}`);
+          console.log(import_chalk3.default.red("  \u2717") + ` ${moduleFile} missing sections: ${moduleValidation.missing.join(", ")}`);
           result.errors.push(`${moduleFile} missing sections: ${moduleValidation.missing.join(", ")}`);
         }
         if (moduleParsed.metadata.lastVerified) {
           const lastVerified = new Date(moduleParsed.metadata.lastVerified);
           const daysSince = Math.floor((Date.now() - lastVerified.getTime()) / (1e3 * 60 * 60 * 24));
           if (daysSince > 30) {
-            console.log(import_chalk2.default.yellow("    \u26A0") + ` last-verified: ${daysSince} days ago`);
+            console.log(import_chalk3.default.yellow("    \u26A0") + ` last-verified: ${daysSince} days ago`);
             result.warnings.push(`${moduleFile} last-verified ${daysSince} days ago`);
           }
         }
@@ -730,12 +891,12 @@ async function validateCommand(options) {
     }
   }
   console.log();
-  console.log(import_chalk2.default.gray("\u2500".repeat(40)));
+  console.log(import_chalk3.default.gray("\u2500".repeat(40)));
   if (result.errors.length === 0 && result.warnings.length === 0) {
-    console.log(import_chalk2.default.green("\u2713 All checks passed"));
+    console.log(import_chalk3.default.green("\u2713 All checks passed"));
   } else {
     console.log(
-      `Summary: ${result.errors.length > 0 ? import_chalk2.default.red(`${result.errors.length} error(s)`) : "0 errors"}, ${result.warnings.length > 0 ? import_chalk2.default.yellow(`${result.warnings.length} warning(s)`) : "0 warnings"}`
+      `Summary: ${result.errors.length > 0 ? import_chalk3.default.red(`${result.errors.length} error(s)`) : "0 errors"}, ${result.warnings.length > 0 ? import_chalk3.default.yellow(`${result.warnings.length} warning(s)`) : "0 warnings"}`
     );
   }
   if (result.errors.length > 0) {
@@ -744,9 +905,9 @@ async function validateCommand(options) {
 }
 
 // src/cli/commands/status.ts
-var import_fs3 = __toESM(require("fs"));
-var import_path3 = __toESM(require("path"));
-var import_chalk3 = __toESM(require("chalk"));
+var import_fs4 = __toESM(require("fs"));
+var import_path4 = __toESM(require("path"));
+var import_chalk4 = __toESM(require("chalk"));
 var import_yaml = __toESM(require("yaml"));
 function formatRelativeTime(date) {
   const now = /* @__PURE__ */ new Date();
@@ -760,40 +921,40 @@ function formatRelativeTime(date) {
   return `${Math.floor(diffDays / 365)} years ago`;
 }
 function getStatusIndicator(daysSince, warning, critical) {
-  if (daysSince >= critical) return import_chalk3.default.red("\u2717 Critical");
-  if (daysSince >= warning) return import_chalk3.default.yellow("\u26A0 Review needed");
-  return import_chalk3.default.green("\u2713 Fresh");
+  if (daysSince >= critical) return import_chalk4.default.red("\u2717 Critical");
+  if (daysSince >= warning) return import_chalk4.default.yellow("\u26A0 Review needed");
+  return import_chalk4.default.green("\u2713 Fresh");
 }
 async function statusCommand() {
   const cwd = process.cwd();
-  const rosettaPath = import_path3.default.join(cwd, "ROSETTA.md");
-  const rosettaDir = import_path3.default.join(cwd, ".rosetta");
-  const configPath = import_path3.default.join(rosettaDir, "config.yml");
-  const notesPath = import_path3.default.join(rosettaDir, "notes.md");
-  const modulesDir = import_path3.default.join(rosettaDir, "modules");
-  if (!import_fs3.default.existsSync(rosettaPath)) {
-    console.log(import_chalk3.default.yellow("Rosetta not initialized in this project."));
+  const rosettaPath = import_path4.default.join(cwd, "ROSETTA.md");
+  const rosettaDir = import_path4.default.join(cwd, ".rosetta");
+  const configPath = import_path4.default.join(rosettaDir, "config.yml");
+  const notesPath = import_path4.default.join(rosettaDir, "notes.md");
+  const modulesDir = import_path4.default.join(rosettaDir, "modules");
+  if (!import_fs4.default.existsSync(rosettaPath)) {
+    console.log(import_chalk4.default.yellow("Rosetta not initialized in this project."));
     console.log();
-    console.log("Run " + import_chalk3.default.white("'rosetta init'") + " to get started.");
+    console.log("Run " + import_chalk4.default.white("'rosetta init'") + " to get started.");
     return;
   }
   let config = {
     staleness: { warning: 30, critical: 90 }
   };
-  if (import_fs3.default.existsSync(configPath)) {
+  if (import_fs4.default.existsSync(configPath)) {
     try {
-      const configContent = import_fs3.default.readFileSync(configPath, "utf-8");
+      const configContent = import_fs4.default.readFileSync(configPath, "utf-8");
       config = { ...config, ...import_yaml.default.parse(configContent) };
     } catch {
     }
   }
   const warningDays = config.staleness?.warning || 30;
   const criticalDays = config.staleness?.critical || 90;
-  console.log(import_chalk3.default.cyan("Rosetta Status"));
-  console.log(import_chalk3.default.gray("\u2550".repeat(40)));
+  console.log(import_chalk4.default.cyan("Rosetta Status"));
+  console.log(import_chalk4.default.gray("\u2550".repeat(40)));
   console.log();
-  console.log(import_chalk3.default.white("Root Context"));
-  const rosettaContent = import_fs3.default.readFileSync(rosettaPath, "utf-8");
+  console.log(import_chalk4.default.white("Root Context"));
+  const rosettaContent = import_fs4.default.readFileSync(rosettaPath, "utf-8");
   const rosettaParsed = parseRosettaFile(rosettaContent);
   let rootDays = 0;
   if (rosettaParsed.metadata.lastUpdated) {
@@ -801,27 +962,27 @@ async function statusCommand() {
     rootDays = Math.floor((Date.now() - lastUpdated.getTime()) / (1e3 * 60 * 60 * 24));
     const status = getStatusIndicator(rootDays, warningDays, criticalDays);
     console.log(
-      `  ROSETTA.md`.padEnd(24) + import_chalk3.default.gray(`updated ${formatRelativeTime(lastUpdated)}`.padEnd(24)) + status
+      `  ROSETTA.md`.padEnd(24) + import_chalk4.default.gray(`updated ${formatRelativeTime(lastUpdated)}`.padEnd(24)) + status
     );
   } else {
-    const stat = import_fs3.default.statSync(rosettaPath);
+    const stat = import_fs4.default.statSync(rosettaPath);
     rootDays = Math.floor((Date.now() - stat.mtime.getTime()) / (1e3 * 60 * 60 * 24));
     const status = getStatusIndicator(rootDays, warningDays, criticalDays);
     console.log(
-      `  ROSETTA.md`.padEnd(24) + import_chalk3.default.gray(`modified ${formatRelativeTime(stat.mtime)}`.padEnd(24)) + status
+      `  ROSETTA.md`.padEnd(24) + import_chalk4.default.gray(`modified ${formatRelativeTime(stat.mtime)}`.padEnd(24)) + status
     );
   }
   console.log();
-  if (import_fs3.default.existsSync(modulesDir)) {
-    const moduleFiles = import_fs3.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
-    console.log(import_chalk3.default.white(`Modules (${moduleFiles.length} total)`));
+  if (import_fs4.default.existsSync(modulesDir)) {
+    const moduleFiles = import_fs4.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
+    console.log(import_chalk4.default.white(`Modules (${moduleFiles.length} total)`));
     if (moduleFiles.length === 0) {
-      console.log(import_chalk3.default.gray("  No module files found"));
+      console.log(import_chalk4.default.gray("  No module files found"));
     } else {
       const staleModules = [];
       for (const moduleFile of moduleFiles) {
-        const modulePath = import_path3.default.join(modulesDir, moduleFile);
-        const moduleContent = import_fs3.default.readFileSync(modulePath, "utf-8");
+        const modulePath = import_path4.default.join(modulesDir, moduleFile);
+        const moduleContent = import_fs4.default.readFileSync(modulePath, "utf-8");
         const moduleParsed = parseRosettaFile(moduleContent);
         let moduleDays = 0;
         let timeStr = "";
@@ -830,25 +991,25 @@ async function statusCommand() {
           moduleDays = Math.floor((Date.now() - lastVerified.getTime()) / (1e3 * 60 * 60 * 24));
           timeStr = `verified ${formatRelativeTime(lastVerified)}`;
         } else {
-          const stat = import_fs3.default.statSync(modulePath);
+          const stat = import_fs4.default.statSync(modulePath);
           moduleDays = Math.floor((Date.now() - stat.mtime.getTime()) / (1e3 * 60 * 60 * 24));
           timeStr = `modified ${formatRelativeTime(stat.mtime)}`;
         }
         const status = getStatusIndicator(moduleDays, warningDays, criticalDays);
-        console.log(`  ${moduleFile}`.padEnd(24) + import_chalk3.default.gray(timeStr.padEnd(24)) + status);
+        console.log(`  ${moduleFile}`.padEnd(24) + import_chalk4.default.gray(timeStr.padEnd(24)) + status);
         if (moduleDays >= warningDays) {
           staleModules.push(moduleFile);
         }
       }
     }
   } else {
-    console.log(import_chalk3.default.white("Modules"));
-    console.log(import_chalk3.default.gray("  .rosetta/modules/ not found"));
+    console.log(import_chalk4.default.white("Modules"));
+    console.log(import_chalk4.default.gray("  .rosetta/modules/ not found"));
   }
   console.log();
-  console.log(import_chalk3.default.white("Agent Notes"));
-  if (import_fs3.default.existsSync(notesPath)) {
-    const notesContent = import_fs3.default.readFileSync(notesPath, "utf-8");
+  console.log(import_chalk4.default.white("Agent Notes"));
+  if (import_fs4.default.existsSync(notesPath)) {
+    const notesContent = import_fs4.default.readFileSync(notesPath, "utf-8");
     const notes = parseAgentNotes(notesContent);
     const totalEntries = notes.reduce((sum, n) => sum + n.notes.length, 0);
     const reviewMatch = notesContent.match(/Last human review:\s*(\d{4}-\d{2}-\d{2})/);
@@ -867,16 +1028,16 @@ async function statusCommand() {
     console.log(`  Total entries:`.padEnd(24) + `${totalEntries}`);
     console.log(`  Since last review:`.padEnd(24) + `${newEntriesSinceReview} new`);
   } else {
-    console.log(import_chalk3.default.gray("  .rosetta/notes.md not found"));
+    console.log(import_chalk4.default.gray("  .rosetta/notes.md not found"));
   }
   console.log();
-  console.log(import_chalk3.default.white("Suggestions"));
+  console.log(import_chalk4.default.white("Suggestions"));
   const suggestions = [];
-  if (import_fs3.default.existsSync(modulesDir)) {
-    const moduleFiles = import_fs3.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
+  if (import_fs4.default.existsSync(modulesDir)) {
+    const moduleFiles = import_fs4.default.readdirSync(modulesDir).filter((f) => f.endsWith(".md"));
     for (const moduleFile of moduleFiles) {
-      const modulePath = import_path3.default.join(modulesDir, moduleFile);
-      const moduleContent = import_fs3.default.readFileSync(modulePath, "utf-8");
+      const modulePath = import_path4.default.join(modulesDir, moduleFile);
+      const moduleContent = import_fs4.default.readFileSync(modulePath, "utf-8");
       const moduleParsed = parseRosettaFile(moduleContent);
       if (moduleParsed.metadata.lastVerified) {
         const lastVerified = new Date(moduleParsed.metadata.lastVerified);
@@ -887,8 +1048,8 @@ async function statusCommand() {
       }
     }
   }
-  if (import_fs3.default.existsSync(notesPath)) {
-    const notesContent = import_fs3.default.readFileSync(notesPath, "utf-8");
+  if (import_fs4.default.existsSync(notesPath)) {
+    const notesContent = import_fs4.default.readFileSync(notesPath, "utf-8");
     const notes = parseAgentNotes(notesContent);
     const reviewMatch = notesContent.match(/Last human review:\s*(\d{4}-\d{2}-\d{2})/);
     if (reviewMatch) {
@@ -906,35 +1067,35 @@ async function statusCommand() {
     }
   }
   if (suggestions.length === 0) {
-    console.log(import_chalk3.default.green("  \u2713 Everything looks good!"));
+    console.log(import_chalk4.default.green("  \u2713 Everything looks good!"));
   } else {
     for (const suggestion of suggestions) {
-      console.log(import_chalk3.default.yellow("  \u2192") + ` ${suggestion}`);
+      console.log(import_chalk4.default.yellow("  \u2192") + ` ${suggestion}`);
     }
   }
 }
 
 // src/cli/commands/add-module.ts
-var import_fs4 = __toESM(require("fs"));
-var import_path4 = __toESM(require("path"));
-var import_chalk4 = __toESM(require("chalk"));
+var import_fs5 = __toESM(require("fs"));
+var import_path5 = __toESM(require("path"));
+var import_chalk5 = __toESM(require("chalk"));
 async function addModuleCommand(name, options) {
   const cwd = process.cwd();
-  const rosettaDir = import_path4.default.join(cwd, ".rosetta");
-  const modulesDir = import_path4.default.join(rosettaDir, "modules");
-  const modulePath = import_path4.default.join(modulesDir, `${name}.md`);
-  if (!import_fs4.default.existsSync(import_path4.default.join(cwd, "ROSETTA.md"))) {
-    console.log(import_chalk4.default.yellow("Rosetta not initialized in this project."));
+  const rosettaDir = import_path5.default.join(cwd, ".rosetta");
+  const modulesDir = import_path5.default.join(rosettaDir, "modules");
+  const modulePath = import_path5.default.join(modulesDir, `${name}.md`);
+  if (!import_fs5.default.existsSync(import_path5.default.join(cwd, "ROSETTA.md"))) {
+    console.log(import_chalk5.default.yellow("Rosetta not initialized in this project."));
     console.log();
-    console.log("Run " + import_chalk4.default.white("'rosetta init'") + " first.");
+    console.log("Run " + import_chalk5.default.white("'rosetta init'") + " first.");
     return;
   }
-  if (import_fs4.default.existsSync(modulePath)) {
-    console.log(import_chalk4.default.yellow(`Module '${name}' already exists at ${modulePath}`));
+  if (import_fs5.default.existsSync(modulePath)) {
+    console.log(import_chalk5.default.yellow(`Module '${name}' already exists at ${modulePath}`));
     return;
   }
-  if (!import_fs4.default.existsSync(modulesDir)) {
-    import_fs4.default.mkdirSync(modulesDir, { recursive: true });
+  if (!import_fs5.default.existsSync(modulesDir)) {
+    import_fs5.default.mkdirSync(modulesDir, { recursive: true });
   }
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   try {
@@ -943,226 +1104,105 @@ async function addModuleCommand(name, options) {
       name: name.charAt(0).toUpperCase() + name.slice(1),
       DATE: today
     });
-    import_fs4.default.writeFileSync(modulePath, moduleContent, "utf-8");
+    import_fs5.default.writeFileSync(modulePath, moduleContent, "utf-8");
   } catch (error) {
-    console.log(import_chalk4.default.red("\u2717") + ` Failed to create module file: ${error}`);
+    console.log(import_chalk5.default.red("\u2717") + ` Failed to create module file: ${error}`);
     return;
   }
-  console.log(import_chalk4.default.green("\u2713") + ` Created .rosetta/modules/${name}.md`);
+  console.log(import_chalk5.default.green("\u2713") + ` Created .rosetta/modules/${name}.md`);
   console.log();
-  console.log(import_chalk4.default.cyan("Next steps:"));
+  console.log(import_chalk5.default.cyan("Next steps:"));
   console.log();
-  console.log("  1. Edit " + import_chalk4.default.white(`.rosetta/modules/${name}.md`) + " to document the module");
+  console.log("  1. Edit " + import_chalk5.default.white(`.rosetta/modules/${name}.md`) + " to document the module");
   console.log("  2. Add an entry to the Module Index in ROSETTA.md:");
   console.log();
-  console.log(import_chalk4.default.gray("     | Module | Path | Description | Load When |"));
-  console.log(import_chalk4.default.gray("     |--------|------|-------------|-----------|"));
+  console.log(import_chalk5.default.gray("     | Module | Path | Description | Load When |"));
+  console.log(import_chalk5.default.gray("     |--------|------|-------------|-----------|"));
   console.log(
-    import_chalk4.default.white(
+    import_chalk5.default.white(
       `     | ${name} | \`.rosetta/modules/${name}.md\` | ${options.description || "[description]"} | [when to load] |`
     )
   );
 }
 
 // src/cli/commands/note.ts
-var import_fs5 = __toESM(require("fs"));
-var import_path5 = __toESM(require("path"));
-var import_chalk5 = __toESM(require("chalk"));
+var import_fs6 = __toESM(require("fs"));
+var import_path6 = __toESM(require("path"));
+var import_chalk6 = __toESM(require("chalk"));
 async function noteCommand(message, options) {
   const cwd = process.cwd();
-  const rosettaDir = import_path5.default.join(cwd, ".rosetta");
-  const notesPath = import_path5.default.join(rosettaDir, "notes.md");
-  if (!import_fs5.default.existsSync(import_path5.default.join(cwd, "ROSETTA.md"))) {
-    console.log(import_chalk5.default.yellow("Rosetta not initialized in this project."));
+  const rosettaDir = import_path6.default.join(cwd, ".rosetta");
+  const notesPath = import_path6.default.join(rosettaDir, "notes.md");
+  if (!import_fs6.default.existsSync(import_path6.default.join(cwd, "ROSETTA.md"))) {
+    console.log(import_chalk6.default.yellow("Rosetta not initialized in this project."));
     console.log();
-    console.log("Run " + import_chalk5.default.white("'rosetta init'") + " first.");
+    console.log("Run " + import_chalk6.default.white("'rosetta init'") + " first.");
     return;
   }
-  if (!import_fs5.default.existsSync(notesPath)) {
-    console.log(import_chalk5.default.yellow(".rosetta/notes.md not found."));
+  if (!import_fs6.default.existsSync(notesPath)) {
+    console.log(import_chalk6.default.yellow(".rosetta/notes.md not found."));
     console.log();
-    console.log("Run " + import_chalk5.default.white("'rosetta init'") + " to create it.");
+    console.log("Run " + import_chalk6.default.white("'rosetta init'") + " to create it.");
     return;
   }
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const agent = options.agent || "human";
-  let content = import_fs5.default.readFileSync(notesPath, "utf-8");
+  let content = import_fs6.default.readFileSync(notesPath, "utf-8");
   const newNote = `
 ### ${today} | ${agent}
 - ${message}
 `;
   content = content.trimEnd() + "\n" + newNote;
-  import_fs5.default.writeFileSync(notesPath, content, "utf-8");
-  console.log(import_chalk5.default.green("\u2713") + " Added note to .rosetta/notes.md");
+  import_fs6.default.writeFileSync(notesPath, content, "utf-8");
+  console.log(import_chalk6.default.green("\u2713") + " Added note to .rosetta/notes.md");
   console.log();
-  console.log(import_chalk5.default.gray(`  ### ${today} | ${agent}`));
-  console.log(import_chalk5.default.gray(`  - ${message}`));
+  console.log(import_chalk6.default.gray(`  ### ${today} | ${agent}`));
+  console.log(import_chalk6.default.gray(`  - ${message}`));
 }
 
 // src/cli/commands/bootstrap.ts
-var import_fs6 = __toESM(require("fs"));
-var import_path6 = __toESM(require("path"));
-var import_chalk6 = __toESM(require("chalk"));
+var import_fs7 = __toESM(require("fs"));
+var import_path7 = __toESM(require("path"));
+var import_chalk7 = __toESM(require("chalk"));
 async function bootstrapCommand(options) {
   const cwd = process.cwd();
-  const rosettaPath = import_path6.default.join(cwd, "ROSETTA.md");
-  if (!import_fs6.default.existsSync(rosettaPath)) {
-    console.log(import_chalk6.default.yellow("Warning: ROSETTA.md not found."));
+  const rosettaPath = import_path7.default.join(cwd, "ROSETTA.md");
+  if (!import_fs7.default.existsSync(rosettaPath)) {
+    console.log(import_chalk7.default.yellow("Warning: ROSETTA.md not found."));
     console.log();
     console.log(
-      import_chalk6.default.gray("Consider running ") + import_chalk6.default.white("'rosetta init'") + import_chalk6.default.gray(" first to create the file structure,")
+      import_chalk7.default.gray("Consider running ") + import_chalk7.default.white("'rosetta init'") + import_chalk7.default.gray(" first to create the file structure,")
     );
-    console.log(import_chalk6.default.gray("then use this bootstrap prompt to have an agent populate the content."));
+    console.log(import_chalk7.default.gray("then use this bootstrap prompt to have an agent populate the content."));
     console.log();
   }
   try {
     const bootstrapPrompt = loadTemplate(TEMPLATES.BOOTSTRAP);
     if (options.output) {
-      import_fs6.default.writeFileSync(options.output, bootstrapPrompt, "utf-8");
-      console.log(import_chalk6.default.green("\u2713") + ` Bootstrap prompt written to ${options.output}`);
+      import_fs7.default.writeFileSync(options.output, bootstrapPrompt, "utf-8");
+      console.log(import_chalk7.default.green("\u2713") + ` Bootstrap prompt written to ${options.output}`);
     } else {
-      console.log(import_chalk6.default.cyan("Rosetta Bootstrap Protocol"));
-      console.log(import_chalk6.default.gray("\u2500".repeat(60)));
-      console.log(import_chalk6.default.gray("Copy and paste the following into your AI coding agent:"));
-      console.log(import_chalk6.default.gray("\u2500".repeat(60)));
+      console.log(import_chalk7.default.cyan("Rosetta Bootstrap Protocol"));
+      console.log(import_chalk7.default.gray("\u2500".repeat(60)));
+      console.log(import_chalk7.default.gray("Copy and paste the following into your AI coding agent:"));
+      console.log(import_chalk7.default.gray("\u2500".repeat(60)));
       console.log();
       console.log(bootstrapPrompt);
       console.log();
-      console.log(import_chalk6.default.gray("\u2500".repeat(60)));
-      console.log(import_chalk6.default.gray("Tip: Use") + import_chalk6.default.white(" rosetta bootstrap | pbcopy ") + import_chalk6.default.gray("to copy to clipboard (macOS)"));
-      console.log(import_chalk6.default.gray("     or") + import_chalk6.default.white(" rosetta bootstrap | xclip -selection clipboard ") + import_chalk6.default.gray("(Linux)"));
+      console.log(import_chalk7.default.gray("\u2500".repeat(60)));
+      console.log(import_chalk7.default.gray("Tip: Use") + import_chalk7.default.white(" rosetta bootstrap | pbcopy ") + import_chalk7.default.gray("to copy to clipboard (macOS)"));
+      console.log(import_chalk7.default.gray("     or") + import_chalk7.default.white(" rosetta bootstrap | xclip -selection clipboard ") + import_chalk7.default.gray("(Linux)"));
     }
   } catch (error) {
-    console.log(import_chalk6.default.red("\u2717") + ` Failed to load bootstrap prompt: ${error}`);
+    console.log(import_chalk7.default.red("\u2717") + ` Failed to load bootstrap prompt: ${error}`);
     process.exitCode = 1;
-  }
-}
-
-// src/cli/commands/setup-agent.ts
-var import_fs7 = __toESM(require("fs"));
-var import_path7 = __toESM(require("path"));
-var import_chalk7 = __toESM(require("chalk"));
-var AGENT_CONFIGS = [
-  {
-    name: "Claude Code",
-    files: [".claude/CLAUDE.md", "CLAUDE.md"],
-    template: TEMPLATES.AGENT_CONFIG_CLAUDE,
-    appendMode: true,
-    sectionMarker: "## Rosetta Protocol"
-  },
-  {
-    name: "Cursor",
-    files: [".cursorrules"],
-    template: TEMPLATES.AGENT_CONFIG_CURSOR,
-    appendMode: true,
-    sectionMarker: "## Rosetta Protocol"
-  },
-  {
-    name: "Aider",
-    files: [".aider.conf.yml"],
-    template: TEMPLATES.AGENT_CONFIG_AIDER,
-    appendMode: false
-    // YAML needs special handling
-  }
-];
-function findExistingFile(files, cwd) {
-  for (const file of files) {
-    const filePath = import_path7.default.join(cwd, file);
-    if (import_fs7.default.existsSync(filePath)) {
-      return filePath;
-    }
-  }
-  return null;
-}
-function hasRosettaSection(content, marker) {
-  return content.includes(marker);
-}
-async function setupAgentCommand(options) {
-  const cwd = process.cwd();
-  const rosettaPath = import_path7.default.join(cwd, "ROSETTA.md");
-  if (!import_fs7.default.existsSync(rosettaPath)) {
-    console.log(import_chalk7.default.yellow("ROSETTA.md not found."));
-    console.log();
-    console.log("Run " + import_chalk7.default.white("'rosetta init'") + " first to initialize Rosetta.");
-    return;
-  }
-  console.log(import_chalk7.default.cyan("Rosetta Agent Setup"));
-  console.log(import_chalk7.default.gray("\u2550".repeat(40)));
-  console.log();
-  const targetAgents = options.agent === "all" || !options.agent ? AGENT_CONFIGS : AGENT_CONFIGS.filter((a) => a.name.toLowerCase().includes(options.agent));
-  let updated = 0;
-  let skipped = 0;
-  let created = 0;
-  for (const agent of targetAgents) {
-    const existingFile = findExistingFile(agent.files, cwd);
-    const templateContent = loadTemplate(agent.template);
-    if (existingFile) {
-      const content = import_fs7.default.readFileSync(existingFile, "utf-8");
-      if (agent.sectionMarker && hasRosettaSection(content, agent.sectionMarker)) {
-        if (!options.force) {
-          console.log(import_chalk7.default.yellow("\u2298") + ` ${agent.name}: Rosetta section already exists (use --force to replace)`);
-          skipped++;
-          continue;
-        }
-        const lines = content.split("\n");
-        const sectionStart = lines.findIndex((l) => l.includes(agent.sectionMarker));
-        if (sectionStart !== -1) {
-          let sectionEnd = lines.length;
-          for (let i = sectionStart + 1; i < lines.length; i++) {
-            if (lines[i].match(/^## /) && !lines[i].includes("Rosetta")) {
-              sectionEnd = i;
-              break;
-            }
-          }
-          lines.splice(sectionStart, sectionEnd - sectionStart);
-          const newContent = lines.join("\n").trimEnd() + "\n\n" + templateContent;
-          import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
-          console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Updated ${import_path7.default.relative(cwd, existingFile)}`);
-          updated++;
-        }
-      } else if (agent.appendMode) {
-        const newContent = content.trimEnd() + "\n\n" + templateContent;
-        import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
-        console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Added Rosetta section to ${import_path7.default.relative(cwd, existingFile)}`);
-        updated++;
-      } else {
-        if (content.includes("ROSETTA.md")) {
-          console.log(import_chalk7.default.yellow("\u2298") + ` ${agent.name}: Already configured for Rosetta`);
-          skipped++;
-        } else {
-          const newContent = content.trimEnd() + "\n\n" + templateContent;
-          import_fs7.default.writeFileSync(existingFile, newContent, "utf-8");
-          console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Updated ${import_path7.default.relative(cwd, existingFile)}`);
-          updated++;
-        }
-      }
-    } else {
-      const targetFile = import_path7.default.join(cwd, agent.files[0]);
-      const targetDir = import_path7.default.dirname(targetFile);
-      if (!import_fs7.default.existsSync(targetDir)) {
-        import_fs7.default.mkdirSync(targetDir, { recursive: true });
-      }
-      import_fs7.default.writeFileSync(targetFile, templateContent, "utf-8");
-      console.log(import_chalk7.default.green("\u2713") + ` ${agent.name}: Created ${agent.files[0]}`);
-      created++;
-    }
-  }
-  console.log();
-  console.log(import_chalk7.default.gray("\u2500".repeat(40)));
-  console.log(
-    `Summary: ${created > 0 ? import_chalk7.default.green(`${created} created`) : "0 created"}, ${updated > 0 ? import_chalk7.default.cyan(`${updated} updated`) : "0 updated"}, ${skipped > 0 ? import_chalk7.default.yellow(`${skipped} skipped`) : "0 skipped"}`
-  );
-  if (created > 0 || updated > 0) {
-    console.log();
-    console.log(import_chalk7.default.green("Agent configs are now Rosetta-aware!"));
-    console.log(import_chalk7.default.gray("Future agent sessions will automatically use Rosetta context."));
   }
 }
 
 // package.json
 var package_default = {
   name: "rosetta-context",
-  version: "1.3.1",
+  version: "1.3.2",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
   bin: {
@@ -1237,7 +1277,7 @@ ${import_chalk8.default.cyan("\u2502")}  ${import_chalk8.default.gray(`v${VERSIO
 ${import_chalk8.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
 `;
 program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner);
-program.command("init").description("Initialize Rosetta in a project").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").action(async (options) => {
+program.command("init").description("Initialize Rosetta in a project").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").option("-l, --lite", "Lite mode: only create agent configs, no ROSETTA.md (for new projects)").action(async (options) => {
   await initCommand(options);
 });
 program.command("validate").description("Check Rosetta files for structural issues").option("-p, --path <path>", "Path to validate (defaults to current directory)").action(async (options) => {

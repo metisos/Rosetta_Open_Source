@@ -41,6 +41,7 @@ program
   .option('-t, --template <template>', 'Use a specific template (minimal, nextjs, python, generic)', 'minimal')
   .option('-f, --force', 'Overwrite existing Rosetta files')
   .option('-b, --bootstrap', 'Output agent instructions to analyze and populate Rosetta')
+  .option('-l, --lite', 'Lite mode: only create agent configs, no ROSETTA.md (for new projects)')
   .action(async (options) => {
     await initCommand(options);
   });

@@ -7,15 +7,44 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { loadTemplate, renderTemplate, TEMPLATES } from '../utils/templates';
+import { setupAgentCommand } from './setup-agent';
 
 export interface InitOptions {
   template?: string;
   force?: boolean;
   bootstrap?: boolean;
+  lite?: boolean;
 }
 
 export async function initCommand(options: InitOptions): Promise<void> {
   const cwd = process.cwd();
+
+  // Lite mode: only set up agent configs, no ROSETTA.md
+  if (options.lite) {
+    console.log(chalk.cyan('Rosetta Lite Init'));
+    console.log(chalk.gray('Setting up agent configs for a new project...'));
+    console.log();
+
+    await setupAgentCommand({ agent: 'all', force: options.force, skipRosettaCheck: true });
+
+    console.log();
+    console.log(chalk.cyan('Lite init complete!'));
+    console.log();
+    console.log(chalk.white('What happens next:'));
+    console.log('  • Agents will see instructions to create ROSETTA.md');
+    console.log('  • They\'ll wait until your project has enough to document');
+    console.log('  • When ready, they\'ll initialize full Rosetta automatically');
+    console.log();
+    console.log(chalk.gray('Triggers for full init:'));
+    console.log('  • First feature/module complete');
+    console.log('  • Clear directory structure established');
+    console.log('  • Patterns starting to emerge');
+    console.log('  • First non-obvious gotcha discovered');
+    console.log();
+    console.log(chalk.gray('Or run ') + chalk.white('rosetta init') + chalk.gray(' manually when ready.'));
+    return;
+  }
+
   const rosettaPath = path.join(cwd, 'ROSETTA.md');
   const rosettaDir = path.join(cwd, '.rosetta');
 
@@ -80,7 +109,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
   console.log();
   console.log('  1. Edit ' + chalk.white('ROSETTA.md') + ' to describe your project');
   console.log('  2. Run ' + chalk.white("'rosetta add-module <name>'") + ' to add module docs');
-  console.log('  3. Add Rosetta protocol to your agent prompts');
+  console.log('  3. Run ' + chalk.white("'rosetta setup-agent'") + ' to configure agent files');
   console.log();
 
   if (options.bootstrap) {

@@ -345,8 +345,22 @@ This project uses Rosetta for persistent AI context.
 - >90 days: Verify critical sections before relying on them
 
 **If ROSETTA.md doesn't exist:**
-- Run \`rosetta init\` or create it by analyzing the codebase
-- See: https://github.com/metisos/Rosetta_Open_Source
+Check if the project is ready for documentation:
+\`\`\`
+Is project ready?
+├── New/empty project with no patterns yet → WAIT
+│   └── Just start working, create ROSETTA.md later
+│
+└── Project has substance → CREATE ROSETTA.md now
+    Triggers:
+    • First feature/module is complete
+    • Directory structure is established
+    • You've discovered a non-obvious gotcha
+    • Patterns are starting to emerge
+\`\`\`
+
+To create: Run \`rosetta init\` OR analyze the codebase and create ROSETTA.md manually.
+See: https://github.com/metisos/Rosetta_Open_Source
 `,
 
   'agent-config-cursor.md': `## Rosetta Protocol
@@ -369,7 +383,11 @@ This codebase uses Rosetta for AI context management.
 
 **Staleness:** <30 days=fresh, 30-90=review, >90=verify before trusting
 
-If ROSETTA.md doesn't exist, create it by analyzing the codebase.
+**If ROSETTA.md doesn't exist:**
+- New/empty project → Wait until patterns emerge, then create it
+- Established project → Create ROSETTA.md by analyzing the codebase
+- Triggers: first feature done, directory structure set, gotcha discovered
+
 See: https://github.com/metisos/Rosetta_Open_Source
 `,
 

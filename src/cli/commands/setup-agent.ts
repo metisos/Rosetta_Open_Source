@@ -11,6 +11,7 @@ import { loadTemplate, TEMPLATES } from '../utils/templates';
 export interface SetupAgentOptions {
   agent?: 'claude' | 'cursor' | 'aider' | 'all';
   force?: boolean;
+  skipRosettaCheck?: boolean;  // For lite mode - allow setup without ROSETTA.md
 }
 
 interface AgentConfig {
@@ -62,8 +63,8 @@ export async function setupAgentCommand(options: SetupAgentOptions): Promise<voi
   const cwd = process.cwd();
   const rosettaPath = path.join(cwd, 'ROSETTA.md');
 
-  // Check if Rosetta is initialized
-  if (!fs.existsSync(rosettaPath)) {
+  // Check if Rosetta is initialized (skip in lite mode)
+  if (!options.skipRosettaCheck && !fs.existsSync(rosettaPath)) {
     console.log(chalk.yellow('ROSETTA.md not found.'));
     console.log();
     console.log("Run " + chalk.white("'rosetta init'") + " first to initialize Rosetta.");
