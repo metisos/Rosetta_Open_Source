@@ -169,5 +169,5 @@ const validation = validateSections(parsed, REQUIRED_SECTIONS);
 ---
 
 <!-- rosetta:version:1.0 -->
-<!-- rosetta:last-updated:2025-12-14 -->
+<!-- rosetta:last-updated:2025-12-15 -->
 <!-- rosetta:paths:src/**/*.ts -->
