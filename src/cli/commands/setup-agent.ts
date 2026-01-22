@@ -6,12 +6,13 @@
 import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
-import { loadTemplate, TEMPLATES } from '../utils/templates';
+import { loadTemplate, TEMPLATES, CLAUDE_HOOKS_FILES } from '../utils/templates';
 
 export interface SetupAgentOptions {
   agent?: 'claude' | 'cursor' | 'aider' | 'all';
   force?: boolean;
   skipRosettaCheck?: boolean;  // For lite mode - allow setup without ROSETTA.md
+  hooks?: boolean;  // Install Claude Code hooks
 }
 
 interface AgentConfig {
@@ -53,6 +54,77 @@ function findExistingFile(files: string[], cwd: string): string | null {
     }
   }
   return null;
+}
+
+interface HooksResult {
+  created: number;
+  skipped: number;
+  updated: number;
+}
+
+function setupClaudeHooks(cwd: string, force: boolean): HooksResult {
+  const result: HooksResult = { created: 0, skipped: 0, updated: 0 };
+
+  const hooksDir = path.join(cwd, '.claude', 'hooks');
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+
+  // Create hooks directory
+  if (!fs.existsSync(hooksDir)) {
+    fs.mkdirSync(hooksDir, { recursive: true });
+  }
+
+  // Install hook scripts
+  for (const hookFile of CLAUDE_HOOKS_FILES) {
+    const hookPath = path.join(hooksDir, hookFile.name);
+
+    if (fs.existsSync(hookPath) && !force) {
+      console.log(chalk.yellow('  ⊘') + ` Hook ${hookFile.name} already exists (use --force to replace)`);
+      result.skipped++;
+      continue;
+    }
+
+    const content = loadTemplate(hookFile.template);
+    fs.writeFileSync(hookPath, content, { mode: 0o755 });
+    console.log(chalk.green('  ✓') + ` Created hook: ${hookFile.name}`);
+    result.created++;
+  }
+
+  // Handle settings.json - merge hooks config
+  const hooksConfig = JSON.parse(loadTemplate(TEMPLATES.CLAUDE_HOOKS_SETTINGS));
+
+  if (fs.existsSync(settingsPath)) {
+    // Merge with existing settings
+    try {
+      const existingContent = fs.readFileSync(settingsPath, 'utf-8');
+      const existingSettings = JSON.parse(existingContent);
+
+      // Check if hooks already exist
+      if (existingSettings.hooks && !force) {
+        console.log(chalk.yellow('  ⊘') + ' settings.json already has hooks (use --force to replace)');
+        result.skipped++;
+      } else {
+        // Merge hooks into existing settings
+        existingSettings.hooks = hooksConfig.hooks;
+        fs.writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2) + '\n', 'utf-8');
+        console.log(chalk.green('  ✓') + ' Updated .claude/settings.json with Rosetta hooks');
+        result.updated++;
+      }
+    } catch {
+      // Invalid JSON, backup and create new
+      const backupPath = settingsPath + '.backup';
+      fs.copyFileSync(settingsPath, backupPath);
+      fs.writeFileSync(settingsPath, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8');
+      console.log(chalk.yellow('  ⚠') + ` Backed up invalid settings.json, created new with hooks`);
+      result.created++;
+    }
+  } else {
+    // Create new settings.json
+    fs.writeFileSync(settingsPath, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8');
+    console.log(chalk.green('  ✓') + ' Created .claude/settings.json with Rosetta hooks');
+    result.created++;
+  }
+
+  return result;
 }
 
 function hasRosettaSection(content: string, marker: string): boolean {
@@ -148,6 +220,20 @@ export async function setupAgentCommand(options: SetupAgentOptions): Promise<voi
     }
   }
 
+  // Install Claude Code hooks if requested or if setting up Claude
+  const shouldInstallHooks = options.hooks !== false &&
+    (options.agent === 'claude' || options.agent === 'all' || !options.agent);
+
+  let hooksResult: HooksResult | null = null;
+  if (shouldInstallHooks) {
+    console.log();
+    console.log(chalk.cyan('Installing Claude Code Hooks...'));
+    hooksResult = setupClaudeHooks(cwd, options.force || false);
+    created += hooksResult.created;
+    updated += hooksResult.updated;
+    skipped += hooksResult.skipped;
+  }
+
   console.log();
   console.log(chalk.gray('─'.repeat(40)));
   console.log(
@@ -160,5 +246,14 @@ export async function setupAgentCommand(options: SetupAgentOptions): Promise<voi
     console.log();
     console.log(chalk.green('Agent configs are now Rosetta-aware!'));
     console.log(chalk.gray('Future agent sessions will automatically use Rosetta context.'));
+
+    if (hooksResult && (hooksResult.created > 0 || hooksResult.updated > 0)) {
+      console.log();
+      console.log(chalk.cyan('Claude Code hooks installed:'));
+      console.log(chalk.gray('  • SessionStart: Reminds to load ROSETTA.md'));
+      console.log(chalk.gray('  • UserPromptSubmit: Adds Rosetta context for exploration'));
+      console.log(chalk.gray('  • PostToolUse: Warns about documentation staleness'));
+      console.log(chalk.gray('  • Stop: Reminds to update .rosetta/notes.md'));
+    }
   }
 }
