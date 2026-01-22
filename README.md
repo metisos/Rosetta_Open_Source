@@ -200,8 +200,9 @@ rosetta init --bootstrap  # Initialize + get AI population prompt
 rosetta init --lite       # Only create agent configs, no ROSETTA.md yet
 
 # Agent configuration
-rosetta setup-agent       # Configure CLAUDE.md, .cursorrules, .aider.conf.yml
-rosetta setup-agent -a claude  # Configure specific agent only
+rosetta setup-agent       # Configure CLAUDE.md, .cursorrules, .aider.conf.yml + Claude hooks
+rosetta setup-agent -a claude  # Configure Claude with hooks
+rosetta setup-agent --no-hooks # Configure without installing Claude hooks
 
 # Maintenance
 rosetta status            # Check documentation freshness/staleness
@@ -217,7 +218,8 @@ rosetta bootstrap         # Output bootstrap prompt
 |----------|---------|-----------------|
 | **New project** (no code yet) | `rosetta init --lite` | Agent configs only - agents will create ROSETTA.md when ready |
 | **Existing project** (has code) | `rosetta init` | Full Rosetta setup - ROSETTA.md + .rosetta/ |
-| **After init** | `rosetta setup-agent` | Configures CLAUDE.md, .cursorrules, .aider.conf.yml |
+| **After init** | `rosetta setup-agent` | Configures CLAUDE.md, .cursorrules, .aider.conf.yml + Claude hooks |
+| **Hooks only** | `rosetta setup-agent -a claude --hooks` | Install Claude Code hooks for automatic Rosetta enforcement |
 
 ### Quality Gates
 
@@ -306,6 +308,52 @@ This codebase uses Rosetta for AI context management.
 
 **Staleness:** <30 days=fresh, 30-90=review, >90=verify
 ```
+
+### Claude Code Hooks (Automatic Setup)
+
+Rosetta can automatically install Claude Code hooks that enhance your workflow without requiring manual agent instructions. These hooks are installed automatically when you run `rosetta setup-agent` for Claude.
+
+```bash
+# Install everything including hooks (default for Claude)
+rosetta setup-agent -a claude
+
+# Install only hooks
+rosetta setup-agent -a claude --hooks
+
+# Skip hooks installation
+rosetta setup-agent -a claude --no-hooks
+```
+
+**Installed Hooks:**
+
+| Hook | Event | What It Does |
+|------|-------|--------------|
+| `rosetta-session-start.sh` | SessionStart | Reminds Claude to load ROSETTA.md at session start |
+| `rosetta-prompt-context.sh` | UserPromptSubmit | Adds Rosetta context for exploration questions |
+| `rosetta-post-edit-staleness.sh` | PostToolUse | Warns when ROSETTA.md may need updating |
+| `rosetta-stop-notes-reminder.sh` | Stop | Reminds Claude to update .rosetta/notes.md |
+
+**Files Created:**
+
+```
+.claude/
+├── settings.json              # Hook configuration
+├── CLAUDE.md                  # Agent instructions
+└── hooks/
+    ├── rosetta-session-start.sh
+    ├── rosetta-prompt-context.sh
+    ├── rosetta-post-edit-staleness.sh
+    └── rosetta-stop-notes-reminder.sh
+```
+
+**Why Hooks?**
+
+Hooks provide *deterministic* enforcement of Rosetta protocol rather than relying on agent instructions:
+- **SessionStart**: Guaranteed reminder at every session start
+- **PostToolUse**: Automatic staleness checks after file edits
+- **Stop**: Guaranteed reminder to update notes before ending
+
+This ensures consistent Rosetta usage even if the agent doesn't read CLAUDE.md instructions.
 
 ### Aider (.aider.conf.yml)
 

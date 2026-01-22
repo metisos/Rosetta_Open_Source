@@ -96,6 +96,8 @@ program
   .description('Configure agent instruction files (CLAUDE.md, .cursorrules, etc.) to use Rosetta')
   .option('-a, --agent <agent>', 'Target agent: claude, cursor, aider, or all (default: all)', 'all')
   .option('-f, --force', 'Overwrite existing Rosetta sections')
+  .option('--hooks', 'Install Claude Code hooks (auto-enabled for Claude agent)')
+  .option('--no-hooks', 'Skip Claude Code hooks installation')
   .action(async (options) => {
     await setupAgentCommand(options);
   });

@@ -88,6 +88,11 @@ declare const TEMPLATES: {
     readonly AGENT_CONFIG_CLAUDE: "agent-config-claude.md";
     readonly AGENT_CONFIG_CURSOR: "agent-config-cursor.md";
     readonly AGENT_CONFIG_AIDER: "agent-config-aider.yml";
+    readonly CLAUDE_HOOKS_SETTINGS: "claude-hooks-settings.json";
+    readonly CLAUDE_HOOK_SESSION_START: "claude-hook-session-start.sh";
+    readonly CLAUDE_HOOK_PROMPT_CONTEXT: "claude-hook-prompt-context.sh";
+    readonly CLAUDE_HOOK_POST_EDIT_STALENESS: "claude-hook-post-edit-staleness.sh";
+    readonly CLAUDE_HOOK_STOP_NOTES_REMINDER: "claude-hook-stop-notes-reminder.sh";
 };
 
 /**

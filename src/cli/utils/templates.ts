@@ -396,6 +396,269 @@ read:
   - ROSETTA.md
   - .rosetta/notes.md
 `,
+
+  // Claude Code Hooks
+  'claude-hooks-settings.json': `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/rosetta-session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/rosetta-prompt-context.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/rosetta-post-edit-staleness.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/rosetta-stop-notes-reminder.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+`,
+
+  'claude-hook-session-start.sh': `#!/bin/bash
+#
+# Rosetta Session Start Hook
+# Reminds Claude to load ROSETTA.md context at the beginning of sessions
+#
+
+# Get project directory from environment or input
+if [ -n "$CLAUDE_PROJECT_DIR" ]; then
+    PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+    # Try to extract from stdin JSON
+    input=$(cat)
+    PROJECT_DIR=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+fi
+
+# Check if ROSETTA.md exists in the project
+if [ -n "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/ROSETTA.md" ]; then
+    echo "Rosetta Protocol Active: ROSETTA.md found"
+    echo ""
+    echo "Session start checklist:"
+    echo "  1. Read ROSETTA.md for project context"
+    echo "  2. Check Module Index and load relevant .rosetta/modules/ files"
+    echo "  3. Review .rosetta/notes.md for recent discoveries"
+
+    # Check if modules directory exists
+    if [ -d "$PROJECT_DIR/.rosetta/modules" ]; then
+        module_count=$(find "$PROJECT_DIR/.rosetta/modules" -name "*.md" 2>/dev/null | wc -l)
+        if [ "$module_count" -gt 0 ]; then
+            echo ""
+            echo "Available modules: $module_count"
+        fi
+    fi
+
+    # Check notes.md freshness
+    if [ -f "$PROJECT_DIR/.rosetta/notes.md" ]; then
+        last_modified=$(stat -c %Y "$PROJECT_DIR/.rosetta/notes.md" 2>/dev/null || stat -f %m "$PROJECT_DIR/.rosetta/notes.md" 2>/dev/null)
+        current_time=$(date +%s)
+        age_days=$(( (current_time - last_modified) / 86400 ))
+        if [ "$age_days" -gt 7 ]; then
+            echo ""
+            echo "Note: .rosetta/notes.md is \${age_days} days old - consider reviewing"
+        fi
+    fi
+fi
+
+exit 0
+`,
+
+  'claude-hook-prompt-context.sh': `#!/bin/bash
+#
+# Rosetta Prompt Context Hook
+# Adds Rosetta protocol context to user prompts when working in Rosetta projects
+#
+
+# Read input from stdin
+input=$(cat)
+
+# Get project directory
+if [ -n "$CLAUDE_PROJECT_DIR" ]; then
+    PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+    PROJECT_DIR=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+fi
+
+# Only activate for projects with ROSETTA.md
+if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/ROSETTA.md" ]; then
+    exit 0
+fi
+
+# Get the user's prompt
+user_prompt=$(echo "$input" | jq -r '.prompt // empty' 2>/dev/null)
+
+# Check if this seems like a codebase exploration question
+exploration_keywords=("where" "how" "what" "find" "show" "explain" "understand" "architecture" "structure")
+is_exploration=false
+
+for keyword in "\${exploration_keywords[@]}"; do
+    if echo "$user_prompt" | grep -qi "\\b$keyword\\b"; then
+        is_exploration=true
+        break
+    fi
+done
+
+# If it's an exploration question, remind about Rosetta
+if [ "$is_exploration" = true ]; then
+    # Provide context as additional info
+    context=$(cat << 'EOFCONTEXT'
+{
+  "additionalContext": "This project uses Rosetta Protocol. ROSETTA.md contains project context including architecture, conventions, gotchas, and module index. Check .rosetta/notes.md for recent agent discoveries."
+}
+EOFCONTEXT
+)
+    echo "$context"
+fi
+
+exit 0
+`,
+
+  'claude-hook-post-edit-staleness.sh': `#!/bin/bash
+#
+# Rosetta Post-Edit Hook - Staleness Detection
+# Checks if ROSETTA.md might need updating after significant code changes
+#
+
+# Read input from stdin
+input=$(cat)
+
+# Get project directory
+if [ -n "$CLAUDE_PROJECT_DIR" ]; then
+    PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+    PROJECT_DIR=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+fi
+
+# Only activate for projects with ROSETTA.md
+if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/ROSETTA.md" ]; then
+    exit 0
+fi
+
+# Get the file that was edited
+tool_name=$(echo "$input" | jq -r '.tool_name // empty' 2>/dev/null)
+file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+
+# Only check for Write and Edit tools
+if [ "$tool_name" != "Write" ] && [ "$tool_name" != "Edit" ]; then
+    exit 0
+fi
+
+# Skip if no file path
+if [ -z "$file_path" ]; then
+    exit 0
+fi
+
+# Check if editing critical files that might affect ROSETTA.md accuracy
+critical_patterns=(
+    "*/cli/commands/*"
+    "*/index.ts"
+    "package.json"
+    "tsconfig.json"
+    "*/utils/*"
+)
+
+is_critical=false
+for pattern in "\${critical_patterns[@]}"; do
+    if [[ "$file_path" == $pattern ]]; then
+        is_critical=true
+        break
+    fi
+done
+
+# Check last-updated date in ROSETTA.md
+if [ "$is_critical" = true ]; then
+    last_updated=$(grep -o 'rosetta:last-updated:[0-9-]*' "$PROJECT_DIR/ROSETTA.md" | cut -d: -f3)
+    if [ -n "$last_updated" ]; then
+        last_updated_ts=$(date -d "$last_updated" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$last_updated" +%s 2>/dev/null)
+        current_ts=$(date +%s)
+        age_days=$(( (current_ts - last_updated_ts) / 86400 ))
+
+        if [ "$age_days" -gt 14 ]; then
+            echo "Note: ROSETTA.md last updated \${age_days} days ago. Consider updating if architecture changed."
+        fi
+    fi
+fi
+
+exit 0
+`,
+
+  'claude-hook-stop-notes-reminder.sh': `#!/bin/bash
+#
+# Rosetta Stop Hook - Notes Reminder
+# Reminds Claude to update .rosetta/notes.md before ending the session
+#
+
+# Read input from stdin
+input=$(cat)
+
+# Get project directory
+if [ -n "$CLAUDE_PROJECT_DIR" ]; then
+    PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+    PROJECT_DIR=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+fi
+
+# Only activate for projects with ROSETTA.md
+if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/ROSETTA.md" ]; then
+    exit 0
+fi
+
+# Output reminder as additional context
+cat << 'EOF'
+Rosetta Session End Reminder:
+
+Before ending this session, consider if you learned anything valuable:
+- Non-obvious discoveries about the codebase
+- Gotchas or pitfalls encountered
+- Patterns or conventions you observed
+- Integration points or dependencies found
+
+If so, append to .rosetta/notes.md using format:
+### YYYY-MM-DD | agent-name
+- Discovery 1
+- Discovery 2
+
+Rules: Keep notes actionable and non-obvious. Skip if nothing new was learned.
+EOF
+
+# Allow the stop to proceed
+echo '{"decision": "allow"}'
+exit 0
+`,
 };
 
 /**
@@ -448,4 +711,19 @@ export const TEMPLATES = {
   AGENT_CONFIG_CLAUDE: 'agent-config-claude.md',
   AGENT_CONFIG_CURSOR: 'agent-config-cursor.md',
   AGENT_CONFIG_AIDER: 'agent-config-aider.yml',
+  CLAUDE_HOOKS_SETTINGS: 'claude-hooks-settings.json',
+  CLAUDE_HOOK_SESSION_START: 'claude-hook-session-start.sh',
+  CLAUDE_HOOK_PROMPT_CONTEXT: 'claude-hook-prompt-context.sh',
+  CLAUDE_HOOK_POST_EDIT_STALENESS: 'claude-hook-post-edit-staleness.sh',
+  CLAUDE_HOOK_STOP_NOTES_REMINDER: 'claude-hook-stop-notes-reminder.sh',
 } as const;
+
+/**
+ * Claude hooks file definitions for easy iteration
+ */
+export const CLAUDE_HOOKS_FILES = [
+  { name: 'rosetta-session-start.sh', template: 'claude-hook-session-start.sh' },
+  { name: 'rosetta-prompt-context.sh', template: 'claude-hook-prompt-context.sh' },
+  { name: 'rosetta-post-edit-staleness.sh', template: 'claude-hook-post-edit-staleness.sh' },
+  { name: 'rosetta-stop-notes-reminder.sh', template: 'claude-hook-stop-notes-reminder.sh' },
+] as const;
