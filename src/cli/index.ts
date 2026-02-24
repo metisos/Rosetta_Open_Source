@@ -21,19 +21,37 @@ const VERSION = pkg.version;
 
 const program = new Command();
 
-// ASCII art banner
-const banner = `
-${chalk.cyan('┌─────────────────────────────────────────────────────────┐')}
-${chalk.cyan('│')}  ${chalk.white('ROSETTA')} ${chalk.gray('- Agent Codebase Understanding Protocol')}      ${chalk.cyan('│')}
-${chalk.cyan('│')}  ${chalk.gray(`v${VERSION}`)}                                                 ${chalk.cyan('│')}
-${chalk.cyan('└─────────────────────────────────────────────────────────┘')}
-`;
+// Block-art ASCII banner with gradient
+const banner = [
+  '',
+  chalk.cyanBright('   \u2588\u2580\u2580\u2588 \u2588\u2580\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2588\u2580\u2580\u2588'),
+  chalk.cyan(      '   \u2588\u2584\u2584\u2580 \u2588  \u2588 \u2580\u2580\u2588 \u2588\u2580\u2580   \u2588     \u2588   \u2588\u2584\u2584\u2588'),
+  chalk.gray(      '   \u2588  \u2588 \u2580\u2580\u2580\u2580 \u2580\u2580\u2580 \u2580\u2580\u2580   \u2580     \u2580   \u2588  \u2588'),
+  '',
+  `   ${chalk.gray('Agent Codebase Understanding Protocol')}  ${chalk.cyanBright('v' + VERSION)}`,
+  '',
+].join('\n');
 
 program
   .name('rosetta')
   .description('Agent codebase understanding protocol - Help AI coding agents understand your codebase')
   .version(VERSION)
-  .addHelpText('before', banner);
+  .addHelpText('before', banner)
+  .action(() => {
+    // Default action when no subcommand given — show custom welcome
+    console.log(banner);
+    console.log(chalk.cyan('  Quick Start:'));
+    console.log();
+    console.log('    ' + chalk.white('rosetta init') + chalk.gray('         Interactive setup (AI-assisted or manual)'));
+    console.log('    ' + chalk.white('rosetta init -b') + chalk.gray('      Initialize and get bootstrap prompt'));
+    console.log('    ' + chalk.white('rosetta status') + chalk.gray('       Check documentation freshness'));
+    console.log('    ' + chalk.white('rosetta validate') + chalk.gray('     Validate Rosetta file structure'));
+    console.log();
+    console.log(chalk.gray('  Run ') + chalk.white('rosetta --help') + chalk.gray(' for all commands'));
+    console.log();
+    console.log(chalk.gray('  Docs: https://github.com/metisos/Rosetta_Open_Source'));
+    console.log();
+  });
 
 // rosetta init - now with interactive mode by default
 program
@@ -117,18 +135,3 @@ program
 
 // Parse and execute
 program.parse();
-
-// Show help if no command provided
-if (!process.argv.slice(2).length) {
-  console.log(banner);
-  console.log(chalk.cyan('Quick Start:'));
-  console.log();
-  console.log('  ' + chalk.white('rosetta init') + chalk.gray('         Interactive setup (AI-assisted or manual)'));
-  console.log('  ' + chalk.white('rosetta init -b') + chalk.gray('      Initialize and get bootstrap prompt'));
-  console.log('  ' + chalk.white('rosetta status') + chalk.gray('       Check documentation freshness'));
-  console.log('  ' + chalk.white('rosetta validate') + chalk.gray('     Validate Rosetta file structure'));
-  console.log();
-  console.log(chalk.gray('Run ') + chalk.white('rosetta --help') + chalk.gray(' for all commands'));
-  console.log();
-  console.log(chalk.gray('Docs: https://github.com/metisos/Rosetta_Open_Source'));
-}

@@ -2200,7 +2200,7 @@ function printNextSteps(method) {
 // package.json
 var package_default = {
   name: "rosetta-context",
-  version: "1.3.3",
+  version: "1.4.0",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
   bin: {
@@ -2271,13 +2271,29 @@ var package_default = {
 // src/cli/index.ts
 var VERSION = package_default.version;
 var program = new import_commander.Command();
-var banner = `
-${import_chalk9.default.cyan("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")}
-${import_chalk9.default.cyan("\u2502")}  ${import_chalk9.default.white("ROSETTA")} ${import_chalk9.default.gray("- Agent Codebase Understanding Protocol")}      ${import_chalk9.default.cyan("\u2502")}
-${import_chalk9.default.cyan("\u2502")}  ${import_chalk9.default.gray(`v${VERSION}`)}                                                 ${import_chalk9.default.cyan("\u2502")}
-${import_chalk9.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
-`;
-program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner);
+var banner = [
+  "",
+  import_chalk9.default.cyanBright("   \u2588\u2580\u2580\u2588 \u2588\u2580\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2588\u2580\u2580\u2588"),
+  import_chalk9.default.cyan("   \u2588\u2584\u2584\u2580 \u2588  \u2588 \u2580\u2580\u2588 \u2588\u2580\u2580   \u2588     \u2588   \u2588\u2584\u2584\u2588"),
+  import_chalk9.default.gray("   \u2588  \u2588 \u2580\u2580\u2580\u2580 \u2580\u2580\u2580 \u2580\u2580\u2580   \u2580     \u2580   \u2588  \u2588"),
+  "",
+  `   ${import_chalk9.default.gray("Agent Codebase Understanding Protocol")}  ${import_chalk9.default.cyanBright("v" + VERSION)}`,
+  ""
+].join("\n");
+program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner).action(() => {
+  console.log(banner);
+  console.log(import_chalk9.default.cyan("  Quick Start:"));
+  console.log();
+  console.log("    " + import_chalk9.default.white("rosetta init") + import_chalk9.default.gray("         Interactive setup (AI-assisted or manual)"));
+  console.log("    " + import_chalk9.default.white("rosetta init -b") + import_chalk9.default.gray("      Initialize and get bootstrap prompt"));
+  console.log("    " + import_chalk9.default.white("rosetta status") + import_chalk9.default.gray("       Check documentation freshness"));
+  console.log("    " + import_chalk9.default.white("rosetta validate") + import_chalk9.default.gray("     Validate Rosetta file structure"));
+  console.log();
+  console.log(import_chalk9.default.gray("  Run ") + import_chalk9.default.white("rosetta --help") + import_chalk9.default.gray(" for all commands"));
+  console.log();
+  console.log(import_chalk9.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
+  console.log();
+});
 program.command("init").description("Initialize Rosetta in a project (interactive by default)").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").option("-l, --lite", "Lite mode: only create agent configs, no ROSETTA.md (for new projects)").option("--no-interactive", "Skip interactive prompts, use template mode directly").action(async (options) => {
   const isInteractive = process.stdin.isTTY && options.interactive !== false && !options.bootstrap && !options.lite;
   if (isInteractive) {
@@ -2306,17 +2322,4 @@ program.command("setup-agent").description("Configure agent instruction files (C
   await setupAgentCommand(options);
 });
 program.parse();
-if (!process.argv.slice(2).length) {
-  console.log(banner);
-  console.log(import_chalk9.default.cyan("Quick Start:"));
-  console.log();
-  console.log("  " + import_chalk9.default.white("rosetta init") + import_chalk9.default.gray("         Interactive setup (AI-assisted or manual)"));
-  console.log("  " + import_chalk9.default.white("rosetta init -b") + import_chalk9.default.gray("      Initialize and get bootstrap prompt"));
-  console.log("  " + import_chalk9.default.white("rosetta status") + import_chalk9.default.gray("       Check documentation freshness"));
-  console.log("  " + import_chalk9.default.white("rosetta validate") + import_chalk9.default.gray("     Validate Rosetta file structure"));
-  console.log();
-  console.log(import_chalk9.default.gray("Run ") + import_chalk9.default.white("rosetta --help") + import_chalk9.default.gray(" for all commands"));
-  console.log();
-  console.log(import_chalk9.default.gray("Docs: https://github.com/metisos/Rosetta_Open_Source"));
-}
 //# sourceMappingURL=index.js.map
