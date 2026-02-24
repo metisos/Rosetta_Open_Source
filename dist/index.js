@@ -30,13 +30,16 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var src_exports = {};
 __export(src_exports, {
+  PROVIDERS: () => PROVIDERS,
   REQUIRED_MODULE_SECTIONS: () => REQUIRED_MODULE_SECTIONS,
   REQUIRED_SECTIONS: () => REQUIRED_SECTIONS,
   ROSETTA_PROTOCOL: () => ROSETTA_PROTOCOL,
   TEMPLATES: () => TEMPLATES,
+  analyzeCodebase: () => analyzeCodebase,
   getFilesModifiedSince: () => getFilesModifiedSince,
   getGitRoot: () => getGitRoot,
   getLastModified: () => getLastModified,
+  getProvider: () => getProvider,
   isGitRepo: () => isGitRepo,
   loadAndRenderTemplate: () => loadAndRenderTemplate,
   loadTemplate: () => loadTemplate,
@@ -930,6 +933,407 @@ function getGitRoot(dir) {
   }
 }
 
+// src/cli/ai/providers.ts
+var ANTHROPIC_MODELS = [
+  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (recommended)", recommended: true },
+  { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" }
+];
+async function anthropicGenerate(opts) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": opts.apiKey,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: 8192,
+      system: opts.systemPrompt,
+      messages: [{ role: "user", content: opts.userPrompt }]
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Anthropic API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  const textBlock = data.content.find((b) => b.type === "text");
+  if (!textBlock?.text) {
+    throw new Error("Anthropic returned no text content");
+  }
+  return textBlock.text;
+}
+var OPENAI_MODELS = [
+  { id: "gpt-4o", label: "GPT-4o (recommended)", recommended: true },
+  { id: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { id: "o3-mini", label: "o3-mini" }
+];
+async function openaiGenerate(opts) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${opts.apiKey}`
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: 8192,
+      messages: [
+        { role: "system", content: opts.systemPrompt },
+        { role: "user", content: opts.userPrompt }
+      ]
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  if (!data.choices?.[0]?.message?.content) {
+    throw new Error("OpenAI returned no content");
+  }
+  return data.choices[0].message.content;
+}
+var GEMINI_MODELS = [
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (recommended)", recommended: true },
+  { id: "gemini-2.0-pro", label: "Gemini 2.0 Pro" },
+  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro" }
+];
+async function geminiGenerate(opts) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${opts.apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+      contents: [{ parts: [{ text: opts.userPrompt }] }],
+      generationConfig: { maxOutputTokens: 8192 }
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gemini API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error("Gemini returned no content");
+  }
+  return text;
+}
+var PROVIDERS = {
+  anthropic: {
+    name: "anthropic",
+    displayName: "Anthropic (Claude)",
+    models: ANTHROPIC_MODELS,
+    generateRosetta: anthropicGenerate
+  },
+  openai: {
+    name: "openai",
+    displayName: "OpenAI (GPT)",
+    models: OPENAI_MODELS,
+    generateRosetta: openaiGenerate
+  },
+  gemini: {
+    name: "gemini",
+    displayName: "Google (Gemini)",
+    models: GEMINI_MODELS,
+    generateRosetta: geminiGenerate
+  }
+};
+function getProvider(name) {
+  const provider = PROVIDERS[name];
+  if (!provider) {
+    throw new Error(`Unknown provider: ${name}. Available: ${Object.keys(PROVIDERS).join(", ")}`);
+  }
+  return provider;
+}
+
+// src/cli/ai/analyze.ts
+var import_fs = __toESM(require("fs"));
+var import_path2 = __toESM(require("path"));
+var import_child_process2 = require("child_process");
+function getDirectoryTree(cwd) {
+  try {
+    const files = (0, import_child_process2.execSync)("git ls-files --cached --others --exclude-standard", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 1e4
+    }).trim().split("\n").filter(Boolean);
+    const tree = buildTreeString(files);
+    return tree;
+  } catch {
+    return getBasicTree(cwd, "", 0, 3);
+  }
+}
+function buildTreeString(files) {
+  const dirs = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    const parts = file.split("/");
+    const topDir = parts.length > 1 ? parts[0] : ".";
+    if (!dirs.has(topDir)) {
+      dirs.set(topDir, []);
+    }
+    dirs.get(topDir).push(file);
+  }
+  const lines = [];
+  for (const [dir, dirFiles] of dirs) {
+    if (dir === ".") {
+      for (const f of dirFiles) {
+        lines.push(f);
+      }
+    } else {
+      lines.push(`${dir}/`);
+      const shown = dirFiles.slice(0, 20);
+      for (const f of shown) {
+        lines.push(`  ${f}`);
+      }
+      if (dirFiles.length > 20) {
+        lines.push(`  ... and ${dirFiles.length - 20} more files`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+function getBasicTree(dir, prefix, depth, maxDepth) {
+  if (depth >= maxDepth) return "";
+  const entries = import_fs.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dist").sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  const lines = [];
+  for (const entry of entries) {
+    const isDir = entry.isDirectory();
+    lines.push(`${prefix}${entry.name}${isDir ? "/" : ""}`);
+    if (isDir) {
+      const sub = getBasicTree(import_path2.default.join(dir, entry.name), prefix + "  ", depth + 1, maxDepth);
+      if (sub) lines.push(sub);
+    }
+  }
+  return lines.join("\n");
+}
+function gatherKeyFiles(cwd) {
+  const entries = [];
+  const maxFileSize = 8e3;
+  const maxTotalSize = 6e4;
+  let totalSize = 0;
+  const priorityFiles = [
+    "package.json",
+    "README.md",
+    "CONTRIBUTING.md",
+    "Cargo.toml",
+    "pyproject.toml",
+    "setup.py",
+    "go.mod",
+    "Gemfile",
+    "requirements.txt",
+    "pom.xml",
+    "build.gradle",
+    "tsconfig.json",
+    "next.config.js",
+    "next.config.ts",
+    "vite.config.ts",
+    "webpack.config.js"
+  ];
+  for (const file of priorityFiles) {
+    if (totalSize >= maxTotalSize) break;
+    const fullPath = import_path2.default.join(cwd, file);
+    if (import_fs.default.existsSync(fullPath)) {
+      try {
+        let content = import_fs.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        entries.push({ relativePath: file, content });
+        totalSize += content.length;
+      } catch {
+      }
+    }
+  }
+  const sourcePatterns = [
+    "src/index.ts",
+    "src/index.js",
+    "src/main.ts",
+    "src/main.js",
+    "src/app.ts",
+    "src/app.js",
+    "src/App.tsx",
+    "src/App.jsx",
+    "src/lib/index.ts",
+    "src/lib/index.js",
+    "app/layout.tsx",
+    "app/page.tsx",
+    "pages/index.tsx",
+    "pages/index.jsx",
+    "main.go",
+    "cmd/main.go",
+    "src/main.rs",
+    "src/lib.rs",
+    "main.py",
+    "app.py",
+    "manage.py"
+  ];
+  for (const file of sourcePatterns) {
+    if (totalSize >= maxTotalSize) break;
+    const fullPath = import_path2.default.join(cwd, file);
+    if (import_fs.default.existsSync(fullPath)) {
+      try {
+        let content = import_fs.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        if (!entries.find((e) => e.relativePath === file)) {
+          entries.push({ relativePath: file, content });
+          totalSize += content.length;
+        }
+      } catch {
+      }
+    }
+  }
+  const srcDir = import_path2.default.join(cwd, "src");
+  if (import_fs.default.existsSync(srcDir) && totalSize < maxTotalSize) {
+    const srcFiles = collectSourceFiles(srcDir, cwd, 3);
+    for (const file of srcFiles) {
+      if (totalSize >= maxTotalSize) break;
+      if (entries.find((e) => e.relativePath === file)) continue;
+      const fullPath = import_path2.default.join(cwd, file);
+      try {
+        let content = import_fs.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        entries.push({ relativePath: file, content });
+        totalSize += content.length;
+      } catch {
+      }
+    }
+  }
+  return entries;
+}
+function collectSourceFiles(dir, rootDir, maxDepth, depth = 0) {
+  if (depth >= maxDepth) return [];
+  const files = [];
+  const codeExtensions = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".rb"]);
+  try {
+    const entries = import_fs.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && !e.name.endsWith(".test.ts") && !e.name.endsWith(".spec.ts"));
+    const indexFiles = entries.filter((e) => !e.isDirectory() && e.name.startsWith("index"));
+    for (const f of indexFiles) {
+      files.push(import_path2.default.relative(rootDir, import_path2.default.join(dir, f.name)));
+    }
+    const otherFiles = entries.filter(
+      (e) => !e.isDirectory() && !e.name.startsWith("index") && codeExtensions.has(import_path2.default.extname(e.name))
+    );
+    for (const f of otherFiles.slice(0, 5)) {
+      files.push(import_path2.default.relative(rootDir, import_path2.default.join(dir, f.name)));
+    }
+    const subDirs = entries.filter((e) => e.isDirectory());
+    for (const d of subDirs) {
+      files.push(...collectSourceFiles(import_path2.default.join(dir, d.name), rootDir, maxDepth, depth + 1));
+    }
+  } catch {
+  }
+  return files;
+}
+function buildSystemPrompt() {
+  const bootstrapTemplate = loadTemplate(TEMPLATES.BOOTSTRAP);
+  return `You are an expert software engineer analyzing a codebase to create documentation.
+
+${bootstrapTemplate}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the content of ROSETTA.md - no preamble, no explanation, no code fences around the whole file.
+- Start your response with "# Rosetta" on the first line.
+- Follow the exact section structure from the template.
+- Be concise and accurate. Document what IS, not what should be.
+- Target 800-1200 tokens for the ROSETTA.md content.
+- Include the rosetta metadata comments at the bottom.
+- Set the last-updated date to today's date.`;
+}
+function buildUserPrompt(cwd, tree, files) {
+  const projectName = import_path2.default.basename(cwd);
+  let prompt = `# Codebase Analysis Request
+
+Project directory: ${projectName}
+
+## Directory Structure
+\`\`\`
+${tree}
+\`\`\`
+
+## Key Files
+`;
+  for (const file of files) {
+    prompt += `
+### ${file.relativePath}
+\`\`\`
+${file.content}
+\`\`\`
+`;
+  }
+  prompt += `
+## Instructions
+
+Analyze this codebase and generate a complete ROSETTA.md file. Include all required sections:
+1. Overview (2-4 sentences)
+2. Tech Stack
+3. Architecture (with ASCII diagram)
+4. Directory Structure
+5. Conventions
+6. Entry Points
+7. Key Patterns
+8. Module Index
+9. Gotchas
+10. Agent Notes
+
+Start the file with:
+# Rosetta
+> [one-sentence description]
+
+End with rosetta metadata comments.
+Output ONLY the ROSETTA.md content, starting with "# Rosetta".`;
+  return prompt;
+}
+async function analyzeCodebase(opts) {
+  const { cwd, provider, apiKey, model, onStatus } = opts;
+  onStatus?.("Scanning project structure...");
+  const tree = getDirectoryTree(cwd);
+  onStatus?.("Reading key files...");
+  const files = gatherKeyFiles(cwd);
+  onStatus?.(`Sending to ${provider.displayName} (${model})...`);
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = buildUserPrompt(cwd, tree, files);
+  const generateOpts = {
+    apiKey,
+    model,
+    systemPrompt,
+    userPrompt
+  };
+  onStatus?.("Generating ROSETTA.md...");
+  const result = await provider.generateRosetta(generateOpts);
+  let cleaned = result.trim();
+  if (cleaned.startsWith("```markdown")) {
+    cleaned = cleaned.slice("```markdown".length);
+  } else if (cleaned.startsWith("```md")) {
+    cleaned = cleaned.slice("```md".length);
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.slice(3);
+  }
+  if (cleaned.endsWith("```")) {
+    cleaned = cleaned.slice(0, -3);
+  }
+  cleaned = cleaned.trim();
+  if (!cleaned.startsWith("# Rosetta")) {
+    const idx = cleaned.indexOf("# Rosetta");
+    if (idx > -1) {
+      cleaned = cleaned.slice(idx);
+    }
+  }
+  return cleaned;
+}
+
 // src/index.ts
 var ROSETTA_PROTOCOL = {
   ROOT_FILE: "ROSETTA.md",
@@ -939,13 +1343,16 @@ var ROSETTA_PROTOCOL = {
 };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  PROVIDERS,
   REQUIRED_MODULE_SECTIONS,
   REQUIRED_SECTIONS,
   ROSETTA_PROTOCOL,
   TEMPLATES,
+  analyzeCodebase,
   getFilesModifiedSince,
   getGitRoot,
   getLastModified,
+  getProvider,
   isGitRepo,
   loadAndRenderTemplate,
   loadTemplate,

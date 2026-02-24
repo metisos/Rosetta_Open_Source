@@ -25,7 +25,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/cli/index.ts
 var import_commander = require("commander");
-var import_chalk8 = __toESM(require("chalk"));
+var import_chalk9 = __toESM(require("chalk"));
 
 // src/cli/commands/init.ts
 var import_fs2 = __toESM(require("fs"));
@@ -1533,6 +1533,670 @@ async function bootstrapCommand(options) {
   }
 }
 
+// src/cli/interactive/init.ts
+var import_fs9 = __toESM(require("fs"));
+var import_path9 = __toESM(require("path"));
+var import_chalk8 = __toESM(require("chalk"));
+var import_inquirer = __toESM(require("inquirer"));
+var import_ora = __toESM(require("ora"));
+
+// src/cli/ai/providers.ts
+var ANTHROPIC_MODELS = [
+  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (recommended)", recommended: true },
+  { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" }
+];
+async function anthropicGenerate(opts) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": opts.apiKey,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: 8192,
+      system: opts.systemPrompt,
+      messages: [{ role: "user", content: opts.userPrompt }]
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Anthropic API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  const textBlock = data.content.find((b) => b.type === "text");
+  if (!textBlock?.text) {
+    throw new Error("Anthropic returned no text content");
+  }
+  return textBlock.text;
+}
+var OPENAI_MODELS = [
+  { id: "gpt-4o", label: "GPT-4o (recommended)", recommended: true },
+  { id: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { id: "o3-mini", label: "o3-mini" }
+];
+async function openaiGenerate(opts) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${opts.apiKey}`
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: 8192,
+      messages: [
+        { role: "system", content: opts.systemPrompt },
+        { role: "user", content: opts.userPrompt }
+      ]
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  if (!data.choices?.[0]?.message?.content) {
+    throw new Error("OpenAI returned no content");
+  }
+  return data.choices[0].message.content;
+}
+var GEMINI_MODELS = [
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (recommended)", recommended: true },
+  { id: "gemini-2.0-pro", label: "Gemini 2.0 Pro" },
+  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro" }
+];
+async function geminiGenerate(opts) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${opts.apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+      contents: [{ parts: [{ text: opts.userPrompt }] }],
+      generationConfig: { maxOutputTokens: 8192 }
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gemini API error (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error("Gemini returned no content");
+  }
+  return text;
+}
+var PROVIDERS = {
+  anthropic: {
+    name: "anthropic",
+    displayName: "Anthropic (Claude)",
+    models: ANTHROPIC_MODELS,
+    generateRosetta: anthropicGenerate
+  },
+  openai: {
+    name: "openai",
+    displayName: "OpenAI (GPT)",
+    models: OPENAI_MODELS,
+    generateRosetta: openaiGenerate
+  },
+  gemini: {
+    name: "gemini",
+    displayName: "Google (Gemini)",
+    models: GEMINI_MODELS,
+    generateRosetta: geminiGenerate
+  }
+};
+function getProvider(name) {
+  const provider = PROVIDERS[name];
+  if (!provider) {
+    throw new Error(`Unknown provider: ${name}. Available: ${Object.keys(PROVIDERS).join(", ")}`);
+  }
+  return provider;
+}
+
+// src/cli/ai/analyze.ts
+var import_fs8 = __toESM(require("fs"));
+var import_path8 = __toESM(require("path"));
+var import_child_process = require("child_process");
+function getDirectoryTree(cwd) {
+  try {
+    const files = (0, import_child_process.execSync)("git ls-files --cached --others --exclude-standard", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 1e4
+    }).trim().split("\n").filter(Boolean);
+    const tree = buildTreeString(files);
+    return tree;
+  } catch {
+    return getBasicTree(cwd, "", 0, 3);
+  }
+}
+function buildTreeString(files) {
+  const dirs = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    const parts = file.split("/");
+    const topDir = parts.length > 1 ? parts[0] : ".";
+    if (!dirs.has(topDir)) {
+      dirs.set(topDir, []);
+    }
+    dirs.get(topDir).push(file);
+  }
+  const lines = [];
+  for (const [dir, dirFiles] of dirs) {
+    if (dir === ".") {
+      for (const f of dirFiles) {
+        lines.push(f);
+      }
+    } else {
+      lines.push(`${dir}/`);
+      const shown = dirFiles.slice(0, 20);
+      for (const f of shown) {
+        lines.push(`  ${f}`);
+      }
+      if (dirFiles.length > 20) {
+        lines.push(`  ... and ${dirFiles.length - 20} more files`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+function getBasicTree(dir, prefix, depth, maxDepth) {
+  if (depth >= maxDepth) return "";
+  const entries = import_fs8.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dist").sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  const lines = [];
+  for (const entry of entries) {
+    const isDir = entry.isDirectory();
+    lines.push(`${prefix}${entry.name}${isDir ? "/" : ""}`);
+    if (isDir) {
+      const sub = getBasicTree(import_path8.default.join(dir, entry.name), prefix + "  ", depth + 1, maxDepth);
+      if (sub) lines.push(sub);
+    }
+  }
+  return lines.join("\n");
+}
+function gatherKeyFiles(cwd) {
+  const entries = [];
+  const maxFileSize = 8e3;
+  const maxTotalSize = 6e4;
+  let totalSize = 0;
+  const priorityFiles = [
+    "package.json",
+    "README.md",
+    "CONTRIBUTING.md",
+    "Cargo.toml",
+    "pyproject.toml",
+    "setup.py",
+    "go.mod",
+    "Gemfile",
+    "requirements.txt",
+    "pom.xml",
+    "build.gradle",
+    "tsconfig.json",
+    "next.config.js",
+    "next.config.ts",
+    "vite.config.ts",
+    "webpack.config.js"
+  ];
+  for (const file of priorityFiles) {
+    if (totalSize >= maxTotalSize) break;
+    const fullPath = import_path8.default.join(cwd, file);
+    if (import_fs8.default.existsSync(fullPath)) {
+      try {
+        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        entries.push({ relativePath: file, content });
+        totalSize += content.length;
+      } catch {
+      }
+    }
+  }
+  const sourcePatterns = [
+    "src/index.ts",
+    "src/index.js",
+    "src/main.ts",
+    "src/main.js",
+    "src/app.ts",
+    "src/app.js",
+    "src/App.tsx",
+    "src/App.jsx",
+    "src/lib/index.ts",
+    "src/lib/index.js",
+    "app/layout.tsx",
+    "app/page.tsx",
+    "pages/index.tsx",
+    "pages/index.jsx",
+    "main.go",
+    "cmd/main.go",
+    "src/main.rs",
+    "src/lib.rs",
+    "main.py",
+    "app.py",
+    "manage.py"
+  ];
+  for (const file of sourcePatterns) {
+    if (totalSize >= maxTotalSize) break;
+    const fullPath = import_path8.default.join(cwd, file);
+    if (import_fs8.default.existsSync(fullPath)) {
+      try {
+        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        if (!entries.find((e) => e.relativePath === file)) {
+          entries.push({ relativePath: file, content });
+          totalSize += content.length;
+        }
+      } catch {
+      }
+    }
+  }
+  const srcDir = import_path8.default.join(cwd, "src");
+  if (import_fs8.default.existsSync(srcDir) && totalSize < maxTotalSize) {
+    const srcFiles = collectSourceFiles(srcDir, cwd, 3);
+    for (const file of srcFiles) {
+      if (totalSize >= maxTotalSize) break;
+      if (entries.find((e) => e.relativePath === file)) continue;
+      const fullPath = import_path8.default.join(cwd, file);
+      try {
+        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        if (content.length > maxFileSize) {
+          content = content.slice(0, maxFileSize) + "\n... (truncated)";
+        }
+        entries.push({ relativePath: file, content });
+        totalSize += content.length;
+      } catch {
+      }
+    }
+  }
+  return entries;
+}
+function collectSourceFiles(dir, rootDir, maxDepth, depth = 0) {
+  if (depth >= maxDepth) return [];
+  const files = [];
+  const codeExtensions = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".rb"]);
+  try {
+    const entries = import_fs8.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && !e.name.endsWith(".test.ts") && !e.name.endsWith(".spec.ts"));
+    const indexFiles = entries.filter((e) => !e.isDirectory() && e.name.startsWith("index"));
+    for (const f of indexFiles) {
+      files.push(import_path8.default.relative(rootDir, import_path8.default.join(dir, f.name)));
+    }
+    const otherFiles = entries.filter(
+      (e) => !e.isDirectory() && !e.name.startsWith("index") && codeExtensions.has(import_path8.default.extname(e.name))
+    );
+    for (const f of otherFiles.slice(0, 5)) {
+      files.push(import_path8.default.relative(rootDir, import_path8.default.join(dir, f.name)));
+    }
+    const subDirs = entries.filter((e) => e.isDirectory());
+    for (const d of subDirs) {
+      files.push(...collectSourceFiles(import_path8.default.join(dir, d.name), rootDir, maxDepth, depth + 1));
+    }
+  } catch {
+  }
+  return files;
+}
+function buildSystemPrompt() {
+  const bootstrapTemplate = loadTemplate(TEMPLATES.BOOTSTRAP);
+  return `You are an expert software engineer analyzing a codebase to create documentation.
+
+${bootstrapTemplate}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the content of ROSETTA.md - no preamble, no explanation, no code fences around the whole file.
+- Start your response with "# Rosetta" on the first line.
+- Follow the exact section structure from the template.
+- Be concise and accurate. Document what IS, not what should be.
+- Target 800-1200 tokens for the ROSETTA.md content.
+- Include the rosetta metadata comments at the bottom.
+- Set the last-updated date to today's date.`;
+}
+function buildUserPrompt(cwd, tree, files) {
+  const projectName = import_path8.default.basename(cwd);
+  let prompt = `# Codebase Analysis Request
+
+Project directory: ${projectName}
+
+## Directory Structure
+\`\`\`
+${tree}
+\`\`\`
+
+## Key Files
+`;
+  for (const file of files) {
+    prompt += `
+### ${file.relativePath}
+\`\`\`
+${file.content}
+\`\`\`
+`;
+  }
+  prompt += `
+## Instructions
+
+Analyze this codebase and generate a complete ROSETTA.md file. Include all required sections:
+1. Overview (2-4 sentences)
+2. Tech Stack
+3. Architecture (with ASCII diagram)
+4. Directory Structure
+5. Conventions
+6. Entry Points
+7. Key Patterns
+8. Module Index
+9. Gotchas
+10. Agent Notes
+
+Start the file with:
+# Rosetta
+> [one-sentence description]
+
+End with rosetta metadata comments.
+Output ONLY the ROSETTA.md content, starting with "# Rosetta".`;
+  return prompt;
+}
+async function analyzeCodebase(opts) {
+  const { cwd, provider, apiKey, model, onStatus } = opts;
+  onStatus?.("Scanning project structure...");
+  const tree = getDirectoryTree(cwd);
+  onStatus?.("Reading key files...");
+  const files = gatherKeyFiles(cwd);
+  onStatus?.(`Sending to ${provider.displayName} (${model})...`);
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = buildUserPrompt(cwd, tree, files);
+  const generateOpts = {
+    apiKey,
+    model,
+    systemPrompt,
+    userPrompt
+  };
+  onStatus?.("Generating ROSETTA.md...");
+  const result = await provider.generateRosetta(generateOpts);
+  let cleaned = result.trim();
+  if (cleaned.startsWith("```markdown")) {
+    cleaned = cleaned.slice("```markdown".length);
+  } else if (cleaned.startsWith("```md")) {
+    cleaned = cleaned.slice("```md".length);
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.slice(3);
+  }
+  if (cleaned.endsWith("```")) {
+    cleaned = cleaned.slice(0, -3);
+  }
+  cleaned = cleaned.trim();
+  if (!cleaned.startsWith("# Rosetta")) {
+    const idx = cleaned.indexOf("# Rosetta");
+    if (idx > -1) {
+      cleaned = cleaned.slice(idx);
+    }
+  }
+  return cleaned;
+}
+
+// src/cli/interactive/init.ts
+async function interactiveInit() {
+  const cwd = process.cwd();
+  const rosettaPath = import_path9.default.join(cwd, "ROSETTA.md");
+  const rosettaDir = import_path9.default.join(cwd, ".rosetta");
+  if (import_fs9.default.existsSync(rosettaPath)) {
+    const { overwrite } = await import_inquirer.default.prompt([
+      {
+        type: "confirm",
+        name: "overwrite",
+        message: "ROSETTA.md already exists. Overwrite it?",
+        default: false
+      }
+    ]);
+    if (!overwrite) {
+      console.log(import_chalk8.default.yellow("Aborted. Existing ROSETTA.md preserved."));
+      return;
+    }
+  }
+  console.log();
+  const { method } = await import_inquirer.default.prompt([
+    {
+      type: "list",
+      name: "method",
+      message: "How would you like to initialize Rosetta?",
+      choices: [
+        {
+          name: `${import_chalk8.default.green("AI-Assisted")} ${import_chalk8.default.gray("- An AI model analyzes your codebase and generates ROSETTA.md")}`,
+          value: "ai"
+        },
+        {
+          name: `${import_chalk8.default.blue("Manual")} ${import_chalk8.default.gray("- Creates a template for you to fill in")}`,
+          value: "manual"
+        }
+      ]
+    }
+  ]);
+  if (method === "manual") {
+    await manualInit(cwd, rosettaPath, rosettaDir);
+  } else {
+    await aiAssistedInit(cwd, rosettaPath, rosettaDir);
+  }
+}
+async function manualInit(cwd, rosettaPath, rosettaDir) {
+  const { template } = await import_inquirer.default.prompt([
+    {
+      type: "list",
+      name: "template",
+      message: "Which template?",
+      choices: [
+        { name: "Minimal (recommended)", value: "minimal" },
+        { name: "Full (with more placeholders)", value: "full" }
+      ]
+    }
+  ]);
+  createDirectoryStructure(rosettaDir);
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const templateName = template === "full" ? "ROSETTA.md" : TEMPLATES.ROSETTA_MINIMAL;
+  const rosettaTemplate = loadTemplate(templateName);
+  const rosettaContent = renderTemplate(rosettaTemplate, { DATE: today });
+  import_fs9.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
+  console.log(import_chalk8.default.green("  \u2713") + " Created ROSETTA.md");
+  createSupportFiles(rosettaDir, today);
+  await promptAgentSetup();
+  printNextSteps("manual");
+}
+async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
+  const providerChoices = Object.values(PROVIDERS).map((p) => ({
+    name: p.displayName,
+    value: p.name
+  }));
+  const { providerName } = await import_inquirer.default.prompt([
+    {
+      type: "list",
+      name: "providerName",
+      message: "Which AI provider?",
+      choices: providerChoices
+    }
+  ]);
+  const provider = getProvider(providerName);
+  const { apiKey } = await import_inquirer.default.prompt([
+    {
+      type: "password",
+      name: "apiKey",
+      message: `Enter your ${provider.displayName} API key:`,
+      mask: "*",
+      validate: (input) => {
+        if (!input || input.trim().length === 0) {
+          return "API key is required";
+        }
+        return true;
+      }
+    }
+  ]);
+  const modelChoices = provider.models.map((m) => ({
+    name: m.label,
+    value: m.id
+  }));
+  const { model } = await import_inquirer.default.prompt([
+    {
+      type: "list",
+      name: "model",
+      message: "Which model?",
+      choices: modelChoices
+    }
+  ]);
+  console.log();
+  const spinner = (0, import_ora.default)({
+    text: "Scanning project structure...",
+    color: "cyan"
+  }).start();
+  try {
+    const rosettaContent = await analyzeCodebase({
+      cwd,
+      provider,
+      apiKey: apiKey.trim(),
+      model,
+      onStatus: (msg) => {
+        spinner.text = msg;
+      }
+    });
+    spinner.succeed("ROSETTA.md generated!");
+    console.log();
+    const lines = rosettaContent.split("\n");
+    const previewLines = lines.slice(0, 15);
+    console.log(import_chalk8.default.gray("  \u2500\u2500\u2500 Preview \u2500\u2500\u2500"));
+    for (const line of previewLines) {
+      console.log(import_chalk8.default.gray("  \u2502 ") + line);
+    }
+    if (lines.length > 15) {
+      console.log(import_chalk8.default.gray(`  \u2502 ... (${lines.length - 15} more lines)`));
+    }
+    console.log(import_chalk8.default.gray("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+    console.log();
+    const { confirm } = await import_inquirer.default.prompt([
+      {
+        type: "confirm",
+        name: "confirm",
+        message: "Write this ROSETTA.md to your project?",
+        default: true
+      }
+    ]);
+    if (!confirm) {
+      console.log(import_chalk8.default.yellow("Aborted. No files written."));
+      return;
+    }
+    createDirectoryStructure(rosettaDir);
+    import_fs9.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
+    console.log(import_chalk8.default.green("  \u2713") + " Created ROSETTA.md");
+    const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    createSupportFiles(rosettaDir, today);
+    await promptAgentSetup();
+    printNextSteps("ai");
+  } catch (err) {
+    spinner.fail("Failed to generate ROSETTA.md");
+    console.log();
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(import_chalk8.default.red("  Error: ") + message);
+    console.log();
+    console.log(import_chalk8.default.gray("  Tips:"));
+    console.log(import_chalk8.default.gray("  \u2022 Check that your API key is valid"));
+    console.log(import_chalk8.default.gray("  \u2022 Ensure you have sufficient API credits"));
+    console.log(import_chalk8.default.gray("  \u2022 Try a different model or provider"));
+    console.log();
+    const { fallback } = await import_inquirer.default.prompt([
+      {
+        type: "confirm",
+        name: "fallback",
+        message: "Fall back to manual template?",
+        default: true
+      }
+    ]);
+    if (fallback) {
+      await manualInit(cwd, rosettaPath, rosettaDir);
+    }
+  }
+}
+function createDirectoryStructure(rosettaDir) {
+  const modulesDir = import_path9.default.join(rosettaDir, "modules");
+  if (!import_fs9.default.existsSync(rosettaDir)) {
+    import_fs9.default.mkdirSync(rosettaDir, { recursive: true });
+  }
+  if (!import_fs9.default.existsSync(modulesDir)) {
+    import_fs9.default.mkdirSync(modulesDir, { recursive: true });
+  }
+}
+function createSupportFiles(rosettaDir, today) {
+  const modulesDir = import_path9.default.join(rosettaDir, "modules");
+  try {
+    const notesTemplate = loadTemplate(TEMPLATES.NOTES);
+    const notesContent = renderTemplate(notesTemplate, { DATE: today });
+    import_fs9.default.writeFileSync(import_path9.default.join(rosettaDir, "notes.md"), notesContent, "utf-8");
+    console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/notes.md");
+  } catch {
+    console.log(import_chalk8.default.red("  \u2717") + " Failed to create .rosetta/notes.md");
+  }
+  try {
+    const configTemplate = loadTemplate(TEMPLATES.CONFIG);
+    import_fs9.default.writeFileSync(import_path9.default.join(rosettaDir, "config.yml"), configTemplate, "utf-8");
+    console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/config.yml");
+  } catch {
+    console.log(import_chalk8.default.red("  \u2717") + " Failed to create .rosetta/config.yml");
+  }
+  import_fs9.default.writeFileSync(import_path9.default.join(modulesDir, ".gitkeep"), "", "utf-8");
+  console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/modules/");
+}
+async function promptAgentSetup() {
+  console.log();
+  const { setupAgents } = await import_inquirer.default.prompt([
+    {
+      type: "confirm",
+      name: "setupAgents",
+      message: "Configure AI agent instruction files? (CLAUDE.md, .cursorrules, etc.)",
+      default: true
+    }
+  ]);
+  if (setupAgents) {
+    const { agents } = await import_inquirer.default.prompt([
+      {
+        type: "checkbox",
+        name: "agents",
+        message: "Which agents?",
+        choices: [
+          { name: "Claude Code", value: "claude", checked: true },
+          { name: "Cursor", value: "cursor", checked: true },
+          { name: "Aider", value: "aider", checked: true }
+        ]
+      }
+    ]);
+    if (agents.length > 0) {
+      console.log();
+      for (const agent of agents) {
+        await setupAgentCommand({ agent, force: false, skipRosettaCheck: true });
+      }
+    }
+  }
+}
+function printNextSteps(method) {
+  console.log();
+  console.log(import_chalk8.default.cyan("  Rosetta initialized!"));
+  console.log();
+  if (method === "manual") {
+    console.log(import_chalk8.default.white("  Next steps:"));
+    console.log("    1. Edit " + import_chalk8.default.white("ROSETTA.md") + " to describe your project");
+    console.log("    2. Run " + import_chalk8.default.white("rosetta add-module <name>") + " to add module docs");
+    console.log("    3. Run " + import_chalk8.default.white("rosetta validate") + " to check your work");
+  } else {
+    console.log(import_chalk8.default.white("  Next steps:"));
+    console.log("    1. Review " + import_chalk8.default.white("ROSETTA.md") + " and adjust as needed");
+    console.log("    2. Run " + import_chalk8.default.white("rosetta validate") + " to check structure");
+    console.log("    3. Run " + import_chalk8.default.white("rosetta add-module <name>") + " for detailed module docs");
+  }
+  console.log();
+  console.log(import_chalk8.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
+}
+
 // package.json
 var package_default = {
   name: "rosetta-context",
@@ -1588,13 +2252,16 @@ var package_default = {
     chalk: "^4.1.2",
     commander: "^12.1.0",
     glob: "^10.3.10",
+    inquirer: "^8.2.7",
+    ora: "^5.4.1",
     yaml: "^2.3.4"
   },
   devDependencies: {
+    "@types/inquirer": "^8.2.12",
+    "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     eslint: "^9.13.0",
-    "@types/node": "^20.10.0",
     tsup: "^8.0.1",
     typescript: "^5.3.2",
     vitest: "^1.0.0"
@@ -1605,14 +2272,20 @@ var package_default = {
 var VERSION = package_default.version;
 var program = new import_commander.Command();
 var banner = `
-${import_chalk8.default.cyan("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")}
-${import_chalk8.default.cyan("\u2502")}  ${import_chalk8.default.white("ROSETTA")} ${import_chalk8.default.gray("- Agent Codebase Understanding Protocol")}      ${import_chalk8.default.cyan("\u2502")}
-${import_chalk8.default.cyan("\u2502")}  ${import_chalk8.default.gray(`v${VERSION}`)}                                                 ${import_chalk8.default.cyan("\u2502")}
-${import_chalk8.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
+${import_chalk9.default.cyan("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")}
+${import_chalk9.default.cyan("\u2502")}  ${import_chalk9.default.white("ROSETTA")} ${import_chalk9.default.gray("- Agent Codebase Understanding Protocol")}      ${import_chalk9.default.cyan("\u2502")}
+${import_chalk9.default.cyan("\u2502")}  ${import_chalk9.default.gray(`v${VERSION}`)}                                                 ${import_chalk9.default.cyan("\u2502")}
+${import_chalk9.default.cyan("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518")}
 `;
 program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner);
-program.command("init").description("Initialize Rosetta in a project").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").option("-l, --lite", "Lite mode: only create agent configs, no ROSETTA.md (for new projects)").action(async (options) => {
-  await initCommand(options);
+program.command("init").description("Initialize Rosetta in a project (interactive by default)").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").option("-l, --lite", "Lite mode: only create agent configs, no ROSETTA.md (for new projects)").option("--no-interactive", "Skip interactive prompts, use template mode directly").action(async (options) => {
+  const isInteractive = process.stdin.isTTY && options.interactive !== false && !options.bootstrap && !options.lite;
+  if (isInteractive) {
+    console.log(banner);
+    await interactiveInit();
+  } else {
+    await initCommand(options);
+  }
 });
 program.command("validate").description("Check Rosetta files for structural issues").option("-p, --path <path>", "Path to validate (defaults to current directory)").action(async (options) => {
   await validateCommand(options);
@@ -1635,15 +2308,15 @@ program.command("setup-agent").description("Configure agent instruction files (C
 program.parse();
 if (!process.argv.slice(2).length) {
   console.log(banner);
-  console.log(import_chalk8.default.cyan("Quick Start:"));
+  console.log(import_chalk9.default.cyan("Quick Start:"));
   console.log();
-  console.log("  " + import_chalk8.default.white("rosetta init") + import_chalk8.default.gray("         Initialize Rosetta in your project"));
-  console.log("  " + import_chalk8.default.white("rosetta init -b") + import_chalk8.default.gray("      Initialize and get bootstrap prompt"));
-  console.log("  " + import_chalk8.default.white("rosetta status") + import_chalk8.default.gray("       Check documentation freshness"));
-  console.log("  " + import_chalk8.default.white("rosetta validate") + import_chalk8.default.gray("     Validate Rosetta file structure"));
+  console.log("  " + import_chalk9.default.white("rosetta init") + import_chalk9.default.gray("         Interactive setup (AI-assisted or manual)"));
+  console.log("  " + import_chalk9.default.white("rosetta init -b") + import_chalk9.default.gray("      Initialize and get bootstrap prompt"));
+  console.log("  " + import_chalk9.default.white("rosetta status") + import_chalk9.default.gray("       Check documentation freshness"));
+  console.log("  " + import_chalk9.default.white("rosetta validate") + import_chalk9.default.gray("     Validate Rosetta file structure"));
   console.log();
-  console.log(import_chalk8.default.gray("Run ") + import_chalk8.default.white("rosetta --help") + import_chalk8.default.gray(" for all commands"));
+  console.log(import_chalk9.default.gray("Run ") + import_chalk9.default.white("rosetta --help") + import_chalk9.default.gray(" for all commands"));
   console.log();
-  console.log(import_chalk8.default.gray("Docs: https://github.com/metisos/rosetta"));
+  console.log(import_chalk9.default.gray("Docs: https://github.com/metisos/Rosetta_Open_Source"));
 }
 //# sourceMappingURL=index.js.map

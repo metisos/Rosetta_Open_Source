@@ -14,6 +14,7 @@ import {
   bootstrapCommand,
   setupAgentCommand,
 } from './commands';
+import { interactiveInit } from './interactive';
 import pkg from '../../package.json';
 
 const VERSION = pkg.version;
@@ -34,16 +35,28 @@ program
   .version(VERSION)
   .addHelpText('before', banner);
 
-// rosetta init
+// rosetta init - now with interactive mode by default
 program
   .command('init')
-  .description('Initialize Rosetta in a project')
+  .description('Initialize Rosetta in a project (interactive by default)')
   .option('-t, --template <template>', 'Use a specific template (minimal, nextjs, python, generic)', 'minimal')
   .option('-f, --force', 'Overwrite existing Rosetta files')
   .option('-b, --bootstrap', 'Output agent instructions to analyze and populate Rosetta')
   .option('-l, --lite', 'Lite mode: only create agent configs, no ROSETTA.md (for new projects)')
+  .option('--no-interactive', 'Skip interactive prompts, use template mode directly')
   .action(async (options) => {
-    await initCommand(options);
+    // Default to interactive mode if stdin is a TTY and no flags that imply non-interactive
+    const isInteractive = process.stdin.isTTY
+      && options.interactive !== false
+      && !options.bootstrap
+      && !options.lite;
+
+    if (isInteractive) {
+      console.log(banner);
+      await interactiveInit();
+    } else {
+      await initCommand(options);
+    }
   });
 
 // rosetta validate
@@ -110,12 +123,12 @@ if (!process.argv.slice(2).length) {
   console.log(banner);
   console.log(chalk.cyan('Quick Start:'));
   console.log();
-  console.log('  ' + chalk.white('rosetta init') + chalk.gray('         Initialize Rosetta in your project'));
+  console.log('  ' + chalk.white('rosetta init') + chalk.gray('         Interactive setup (AI-assisted or manual)'));
   console.log('  ' + chalk.white('rosetta init -b') + chalk.gray('      Initialize and get bootstrap prompt'));
   console.log('  ' + chalk.white('rosetta status') + chalk.gray('       Check documentation freshness'));
   console.log('  ' + chalk.white('rosetta validate') + chalk.gray('     Validate Rosetta file structure'));
   console.log();
   console.log(chalk.gray('Run ') + chalk.white('rosetta --help') + chalk.gray(' for all commands'));
   console.log();
-  console.log(chalk.gray('Docs: https://github.com/metisos/rosetta'));
+  console.log(chalk.gray('Docs: https://github.com/metisos/Rosetta_Open_Source'));
 }

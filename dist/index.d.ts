@@ -116,6 +116,47 @@ declare function getFilesModifiedSince(dir: string, since: Date, patterns?: stri
 declare function getGitRoot(dir: string): string | null;
 
 /**
+ * AI Provider abstraction for Rosetta
+ * Uses native fetch (Node 18+) to call Anthropic, OpenAI, and Gemini APIs
+ */
+interface AIProvider {
+    name: string;
+    displayName: string;
+    models: AIModel[];
+    generateRosetta(opts: GenerateOptions): Promise<string>;
+}
+interface AIModel {
+    id: string;
+    label: string;
+    recommended?: boolean;
+}
+interface GenerateOptions {
+    apiKey: string;
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+}
+declare const PROVIDERS: Record<string, AIProvider>;
+declare function getProvider(name: string): AIProvider;
+
+/**
+ * Codebase analyzer for AI-assisted Rosetta initialization
+ * Gathers project context and sends it to the selected AI provider
+ */
+
+interface AnalyzeOptions {
+    cwd: string;
+    provider: AIProvider;
+    apiKey: string;
+    model: string;
+    onStatus?: (msg: string) => void;
+}
+/**
+ * Run the full AI-assisted analysis
+ */
+declare function analyzeCodebase(opts: AnalyzeOptions): Promise<string>;
+
+/**
  * Rosetta - Agent Codebase Understanding Protocol
  *
  * Programmatic API for integrating Rosetta into coding agents
@@ -148,4 +189,4 @@ declare const ROSETTA_PROTOCOL: {
     CONFIG_FILE: string;
 };
 
-export { type ParsedRosetta, REQUIRED_MODULE_SECTIONS, REQUIRED_SECTIONS, ROSETTA_PROTOCOL, type RosettaMetadata, type RosettaSection, TEMPLATES, getFilesModifiedSince, getGitRoot, getLastModified, isGitRepo, loadAndRenderTemplate, loadTemplate, parseAgentNotes, parseModuleIndex, parseRosettaFile, renderTemplate, validateSections };
+export { type AIModel, type AIProvider, type GenerateOptions, PROVIDERS, type ParsedRosetta, REQUIRED_MODULE_SECTIONS, REQUIRED_SECTIONS, ROSETTA_PROTOCOL, type RosettaMetadata, type RosettaSection, TEMPLATES, analyzeCodebase, getFilesModifiedSince, getGitRoot, getLastModified, getProvider, isGitRepo, loadAndRenderTemplate, loadTemplate, parseAgentNotes, parseModuleIndex, parseRosettaFile, renderTemplate, validateSections };

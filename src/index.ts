@@ -30,6 +30,15 @@ export {
   getGitRoot,
 } from './cli/utils/git';
 
+export {
+  PROVIDERS,
+  getProvider,
+  analyzeCodebase,
+  type AIProvider,
+  type AIModel,
+  type GenerateOptions,
+} from './cli/ai';
+
 /**
  * Agent Loading Protocol
  *
