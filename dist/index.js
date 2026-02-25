@@ -37,6 +37,7 @@ __export(src_exports, {
   TEMPLATES: () => TEMPLATES,
   analyzeCodebase: () => analyzeCodebase,
   getFilesModifiedSince: () => getFilesModifiedSince,
+  getGitDiff: () => getGitDiff,
   getGitRoot: () => getGitRoot,
   getLastModified: () => getLastModified,
   getProvider: () => getProvider,
@@ -46,7 +47,12 @@ __export(src_exports, {
   parseAgentNotes: () => parseAgentNotes,
   parseModuleIndex: () => parseModuleIndex,
   parseRosettaFile: () => parseRosettaFile,
+  readConfigFile: () => readConfigFile,
   renderTemplate: () => renderTemplate,
+  resolveApiKey: () => resolveApiKey,
+  resolveConfigNonInteractive: () => resolveConfigNonInteractive,
+  saveProviderToConfig: () => saveProviderToConfig,
+  syncRosetta: () => syncRosetta,
   validateSections: () => validateSections
 });
 module.exports = __toCommonJS(src_exports);
@@ -370,6 +376,14 @@ version: 1
 staleness:
   warning: 30    # Days before showing staleness warning
   critical: 90   # Days before marking as critically stale
+
+# AI provider for sync and watch commands (optional)
+# API keys should be set via environment variables:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+# Or pass via --key flag
+ai: {}
+  # provider: anthropic    # anthropic, openai, or gemini
+  # model: claude-sonnet-4-20250514
 
 # File patterns to track for drift detection (optional)
 # When these files change, related module docs may need updating
@@ -1334,6 +1348,242 @@ async function analyzeCodebase(opts) {
   return cleaned;
 }
 
+// src/cli/ai/diff-sync.ts
+var import_child_process3 = require("child_process");
+var import_fs2 = __toESM(require("fs"));
+var import_path3 = __toESM(require("path"));
+var NO_CHANGES = "NO_CHANGES_NEEDED";
+function getGitDiff(cwd, since) {
+  try {
+    if (since) {
+      return (0, import_child_process3.execSync)(`git diff ${since} -- . ':!.rosetta' ':!ROSETTA.md'`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 15e3
+      }).trim();
+    }
+    let diff = (0, import_child_process3.execSync)("git diff HEAD -- . ':!.rosetta' ':!ROSETTA.md'", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 15e3
+    }).trim();
+    if (!diff) {
+      diff = (0, import_child_process3.execSync)("git diff HEAD~1 HEAD -- . ':!.rosetta' ':!ROSETTA.md'", {
+        cwd,
+        encoding: "utf-8",
+        timeout: 15e3
+      }).trim();
+    }
+    return diff;
+  } catch {
+    return "";
+  }
+}
+function getChangedFilesSummary(cwd, since) {
+  try {
+    const ref = since || "HEAD~1";
+    return (0, import_child_process3.execSync)(`git diff --stat ${ref} -- . ':!.rosetta' ':!ROSETTA.md'`, {
+      cwd,
+      encoding: "utf-8",
+      timeout: 1e4
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+function buildSyncSystemPrompt() {
+  return `You are an expert at maintaining codebase documentation. You will receive:
+1. The current ROSETTA.md file
+2. A git diff showing recent code changes
+
+Your job is to update ROSETTA.md to accurately reflect the changes. Follow these rules:
+
+- ONLY update sections that are directly affected by the diff
+- Preserve all existing content that is still accurate
+- Do NOT modify the Agent Notes section (that is managed separately)
+- Update the <!-- rosetta:last-updated:DATE --> metadata to today's date
+- Keep the same format, structure, and level of detail
+- Be concise \u2014 document what IS, not what should be
+- If the diff only affects tests, configs, or non-architectural files, most sections won't need changes
+
+If no meaningful documentation updates are needed, respond with exactly: ${NO_CHANGES}
+
+Otherwise, respond with the complete updated ROSETTA.md content.
+Start with "# Rosetta" on the first line. No preamble, no explanation, no code fences around the file.`;
+}
+function buildSyncUserPrompt(currentRosetta, diff, changedFiles) {
+  const maxDiffSize = 4e4;
+  let truncatedDiff = diff;
+  if (diff.length > maxDiffSize) {
+    truncatedDiff = diff.slice(0, maxDiffSize) + "\n\n... (diff truncated, " + diff.length + " total chars)";
+  }
+  return `## Current ROSETTA.md
+
+${currentRosetta}
+
+## Changed Files Summary
+
+${changedFiles}
+
+## Git Diff
+
+\`\`\`diff
+${truncatedDiff}
+\`\`\`
+
+## Instructions
+
+Analyze the diff above and determine if ROSETTA.md needs updating.
+Consider: architecture changes, new entry points, new dependencies, convention changes, new gotchas, directory structure changes.
+If updates are needed, output the complete updated ROSETTA.md.
+If no updates are needed, respond with exactly: ${NO_CHANGES}`;
+}
+function buildSummaryPrompt(currentRosetta, updatedRosetta) {
+  const currentLines = currentRosetta.split("\n");
+  const updatedLines = updatedRosetta.split("\n");
+  const changes = [];
+  const currentSections = extractSectionNames(currentRosetta);
+  const updatedSections = extractSectionNames(updatedRosetta);
+  for (const s of updatedSections) {
+    if (!currentSections.includes(s)) changes.push(`Added section: ${s}`);
+  }
+  for (const s of currentSections) {
+    if (!updatedSections.includes(s)) changes.push(`Removed section: ${s}`);
+  }
+  if (currentLines.length !== updatedLines.length) {
+    const delta = updatedLines.length - currentLines.length;
+    changes.push(`Content ${delta > 0 ? "expanded" : "condensed"} by ${Math.abs(delta)} lines`);
+  }
+  return changes.length > 0 ? changes.join(", ") : "Minor updates to existing sections";
+}
+function extractSectionNames(content) {
+  return content.split("\n").filter((line) => line.startsWith("## ")).map((line) => line.replace("## ", "").trim());
+}
+async function syncRosetta(opts) {
+  const { cwd, provider, apiKey, model, since, onStatus } = opts;
+  const rosettaPath = import_path3.default.join(cwd, "ROSETTA.md");
+  if (!import_fs2.default.existsSync(rosettaPath)) {
+    throw new Error('ROSETTA.md not found. Run "rosetta init" first.');
+  }
+  onStatus?.("Reading current ROSETTA.md...");
+  const currentRosetta = import_fs2.default.readFileSync(rosettaPath, "utf-8");
+  onStatus?.("Analyzing git diff...");
+  const diff = getGitDiff(cwd, since);
+  if (!diff) {
+    return {
+      updated: false,
+      content: currentRosetta,
+      diff: "",
+      summary: "No changes detected since last sync"
+    };
+  }
+  const changedFiles = getChangedFilesSummary(cwd, since);
+  onStatus?.(`Sending to ${provider.displayName} (${model})...`);
+  const systemPrompt = buildSyncSystemPrompt();
+  const userPrompt = buildSyncUserPrompt(currentRosetta, diff, changedFiles);
+  const generateOpts = {
+    apiKey,
+    model,
+    systemPrompt,
+    userPrompt
+  };
+  onStatus?.("Analyzing changes...");
+  const result = await provider.generateRosetta(generateOpts);
+  const trimmed = result.trim();
+  if (trimmed === NO_CHANGES || trimmed.includes(NO_CHANGES)) {
+    return {
+      updated: false,
+      content: currentRosetta,
+      diff,
+      summary: "No documentation updates needed for these changes"
+    };
+  }
+  let updatedContent = trimmed;
+  if (updatedContent.startsWith("```markdown")) {
+    updatedContent = updatedContent.slice("```markdown".length);
+  } else if (updatedContent.startsWith("```md")) {
+    updatedContent = updatedContent.slice("```md".length);
+  } else if (updatedContent.startsWith("```")) {
+    updatedContent = updatedContent.slice(3);
+  }
+  if (updatedContent.endsWith("```")) {
+    updatedContent = updatedContent.slice(0, -3);
+  }
+  updatedContent = updatedContent.trim();
+  if (!updatedContent.startsWith("# Rosetta")) {
+    const idx = updatedContent.indexOf("# Rosetta");
+    if (idx > -1) {
+      updatedContent = updatedContent.slice(idx);
+    }
+  }
+  const summary = buildSummaryPrompt(currentRosetta, updatedContent);
+  return {
+    updated: true,
+    content: updatedContent,
+    diff,
+    summary
+  };
+}
+
+// src/cli/ai/config.ts
+var import_fs3 = __toESM(require("fs"));
+var import_path4 = __toESM(require("path"));
+var import_yaml = require("yaml");
+var ENV_KEY_MAP = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY"
+};
+function readConfigFile(cwd) {
+  const configPath = import_path4.default.join(cwd, ".rosetta", "config.yml");
+  if (!import_fs3.default.existsSync(configPath)) return null;
+  try {
+    const raw = import_fs3.default.readFileSync(configPath, "utf-8");
+    return (0, import_yaml.parse)(raw);
+  } catch {
+    return null;
+  }
+}
+function saveProviderToConfig(cwd, providerName, model) {
+  const configPath = import_path4.default.join(cwd, ".rosetta", "config.yml");
+  let config = { version: 1 };
+  if (import_fs3.default.existsSync(configPath)) {
+    try {
+      const raw = import_fs3.default.readFileSync(configPath, "utf-8");
+      config = (0, import_yaml.parse)(raw) || { version: 1 };
+    } catch {
+    }
+  }
+  config.ai = { provider: providerName, model };
+  const dir = import_path4.default.dirname(configPath);
+  if (!import_fs3.default.existsSync(dir)) {
+    import_fs3.default.mkdirSync(dir, { recursive: true });
+  }
+  import_fs3.default.writeFileSync(configPath, (0, import_yaml.stringify)(config), "utf-8");
+}
+function resolveApiKey(providerName, flagKey) {
+  if (flagKey) return flagKey;
+  const envName = ENV_KEY_MAP[providerName];
+  if (envName && process.env[envName]) {
+    return process.env[envName];
+  }
+  if (process.env.ROSETTA_API_KEY) {
+    return process.env.ROSETTA_API_KEY;
+  }
+  return null;
+}
+function resolveConfigNonInteractive(cwd, flags) {
+  const fileConfig = readConfigFile(cwd);
+  const providerName = flags.provider || process.env.ROSETTA_PROVIDER || fileConfig?.ai?.provider || null;
+  let provider = null;
+  if (providerName && PROVIDERS[providerName]) {
+    provider = getProvider(providerName);
+  }
+  const model = flags.model || fileConfig?.ai?.model || (provider ? provider.models.find((m) => m.recommended)?.id || provider.models[0].id : null);
+  const apiKey = resolveApiKey(providerName || "", flags.key);
+  return { provider, model, apiKey, providerName };
+}
+
 // src/index.ts
 var ROSETTA_PROTOCOL = {
   ROOT_FILE: "ROSETTA.md",
@@ -1350,6 +1600,7 @@ var ROSETTA_PROTOCOL = {
   TEMPLATES,
   analyzeCodebase,
   getFilesModifiedSince,
+  getGitDiff,
   getGitRoot,
   getLastModified,
   getProvider,
@@ -1359,7 +1610,12 @@ var ROSETTA_PROTOCOL = {
   parseAgentNotes,
   parseModuleIndex,
   parseRosettaFile,
+  readConfigFile,
   renderTemplate,
+  resolveApiKey,
+  resolveConfigNonInteractive,
+  saveProviderToConfig,
+  syncRosetta,
   validateSections
 });
 //# sourceMappingURL=index.js.map

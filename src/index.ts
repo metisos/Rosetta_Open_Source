@@ -34,9 +34,19 @@ export {
   PROVIDERS,
   getProvider,
   analyzeCodebase,
+  syncRosetta,
+  getGitDiff,
+  resolveConfigNonInteractive,
+  resolveApiKey,
+  readConfigFile,
+  saveProviderToConfig,
   type AIProvider,
   type AIModel,
   type GenerateOptions,
+  type AIConfig,
+  type AIConfigFlags,
+  type DiffSyncOptions,
+  type SyncResult,
 } from './cli/ai';
 
 /**

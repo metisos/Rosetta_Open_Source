@@ -13,6 +13,8 @@ import {
   noteCommand,
   bootstrapCommand,
   setupAgentCommand,
+  syncCommand,
+  watchCommand,
 } from './commands';
 import { interactiveInit } from './interactive';
 import pkg from '../../package.json';
@@ -43,7 +45,8 @@ program
     console.log(chalk.cyan('  Quick Start:'));
     console.log();
     console.log('    ' + chalk.white('rosetta init') + chalk.gray('         Interactive setup (AI-assisted or manual)'));
-    console.log('    ' + chalk.white('rosetta init -b') + chalk.gray('      Initialize and get bootstrap prompt'));
+    console.log('    ' + chalk.white('rosetta sync') + chalk.gray('         Update ROSETTA.md from git diffs via AI'));
+    console.log('    ' + chalk.white('rosetta watch') + chalk.gray('        Monitor changes and auto-sync'));
     console.log('    ' + chalk.white('rosetta status') + chalk.gray('       Check documentation freshness'));
     console.log('    ' + chalk.white('rosetta validate') + chalk.gray('     Validate Rosetta file structure'));
     console.log();
@@ -131,6 +134,33 @@ program
   .option('--no-hooks', 'Skip Claude Code hooks installation')
   .action(async (options) => {
     await setupAgentCommand(options);
+  });
+
+// rosetta sync
+program
+  .command('sync')
+  .description('Analyze git diffs and update ROSETTA.md using AI')
+  .option('-p, --provider <provider>', 'AI provider: anthropic, openai, or gemini')
+  .option('-m, --model <model>', 'Model to use')
+  .option('-k, --key <key>', 'API key (or set via env var)')
+  .option('-s, --since <ref>', 'Git ref to diff from (commit, tag, or date)')
+  .option('-y, --yes', 'Auto-apply without confirmation (non-interactive)')
+  .option('-n, --dry-run', 'Show proposed changes without applying')
+  .action(async (options) => {
+    await syncCommand(options);
+  });
+
+// rosetta watch
+program
+  .command('watch')
+  .description('Monitor file changes and periodically sync ROSETTA.md')
+  .option('-p, --provider <provider>', 'AI provider: anthropic, openai, or gemini')
+  .option('-m, --model <model>', 'Model to use')
+  .option('-k, --key <key>', 'API key (or set via env var)')
+  .option('-i, --interval <minutes>', 'Sync interval in minutes (default: 5)', '5')
+  .option('-y, --yes', 'Auto-apply updates without confirmation')
+  .action(async (options) => {
+    await watchCommand(options);
   });
 
 // Parse and execute

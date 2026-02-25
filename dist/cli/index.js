@@ -25,7 +25,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/cli/index.ts
 var import_commander = require("commander");
-var import_chalk9 = __toESM(require("chalk"));
+var import_chalk11 = __toESM(require("chalk"));
 
 // src/cli/commands/init.ts
 var import_fs2 = __toESM(require("fs"));
@@ -204,6 +204,14 @@ version: 1
 staleness:
   warning: 30    # Days before showing staleness warning
   critical: 90   # Days before marking as critically stale
+
+# AI provider for sync and watch commands (optional)
+# API keys should be set via environment variables:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+# Or pass via --key flag
+ai: {}
+  # provider: anthropic    # anthropic, openai, or gemini
+  # model: claude-sonnet-4-20250514
 
 # File patterns to track for drift detection (optional)
 # When these files change, related module docs may need updating
@@ -1533,12 +1541,193 @@ async function bootstrapCommand(options) {
   }
 }
 
-// src/cli/interactive/init.ts
+// src/cli/commands/sync.ts
+var import_fs10 = __toESM(require("fs"));
+var import_path10 = __toESM(require("path"));
+var import_chalk8 = __toESM(require("chalk"));
+var import_ora = __toESM(require("ora"));
+
+// src/cli/ai/diff-sync.ts
+var import_child_process = require("child_process");
+var import_fs8 = __toESM(require("fs"));
+var import_path8 = __toESM(require("path"));
+var NO_CHANGES = "NO_CHANGES_NEEDED";
+function getGitDiff(cwd, since) {
+  try {
+    if (since) {
+      return (0, import_child_process.execSync)(`git diff ${since} -- . ':!.rosetta' ':!ROSETTA.md'`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 15e3
+      }).trim();
+    }
+    let diff = (0, import_child_process.execSync)("git diff HEAD -- . ':!.rosetta' ':!ROSETTA.md'", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 15e3
+    }).trim();
+    if (!diff) {
+      diff = (0, import_child_process.execSync)("git diff HEAD~1 HEAD -- . ':!.rosetta' ':!ROSETTA.md'", {
+        cwd,
+        encoding: "utf-8",
+        timeout: 15e3
+      }).trim();
+    }
+    return diff;
+  } catch {
+    return "";
+  }
+}
+function getChangedFilesSummary(cwd, since) {
+  try {
+    const ref = since || "HEAD~1";
+    return (0, import_child_process.execSync)(`git diff --stat ${ref} -- . ':!.rosetta' ':!ROSETTA.md'`, {
+      cwd,
+      encoding: "utf-8",
+      timeout: 1e4
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+function buildSyncSystemPrompt() {
+  return `You are an expert at maintaining codebase documentation. You will receive:
+1. The current ROSETTA.md file
+2. A git diff showing recent code changes
+
+Your job is to update ROSETTA.md to accurately reflect the changes. Follow these rules:
+
+- ONLY update sections that are directly affected by the diff
+- Preserve all existing content that is still accurate
+- Do NOT modify the Agent Notes section (that is managed separately)
+- Update the <!-- rosetta:last-updated:DATE --> metadata to today's date
+- Keep the same format, structure, and level of detail
+- Be concise \u2014 document what IS, not what should be
+- If the diff only affects tests, configs, or non-architectural files, most sections won't need changes
+
+If no meaningful documentation updates are needed, respond with exactly: ${NO_CHANGES}
+
+Otherwise, respond with the complete updated ROSETTA.md content.
+Start with "# Rosetta" on the first line. No preamble, no explanation, no code fences around the file.`;
+}
+function buildSyncUserPrompt(currentRosetta, diff, changedFiles) {
+  const maxDiffSize = 4e4;
+  let truncatedDiff = diff;
+  if (diff.length > maxDiffSize) {
+    truncatedDiff = diff.slice(0, maxDiffSize) + "\n\n... (diff truncated, " + diff.length + " total chars)";
+  }
+  return `## Current ROSETTA.md
+
+${currentRosetta}
+
+## Changed Files Summary
+
+${changedFiles}
+
+## Git Diff
+
+\`\`\`diff
+${truncatedDiff}
+\`\`\`
+
+## Instructions
+
+Analyze the diff above and determine if ROSETTA.md needs updating.
+Consider: architecture changes, new entry points, new dependencies, convention changes, new gotchas, directory structure changes.
+If updates are needed, output the complete updated ROSETTA.md.
+If no updates are needed, respond with exactly: ${NO_CHANGES}`;
+}
+function buildSummaryPrompt(currentRosetta, updatedRosetta) {
+  const currentLines = currentRosetta.split("\n");
+  const updatedLines = updatedRosetta.split("\n");
+  const changes = [];
+  const currentSections = extractSectionNames(currentRosetta);
+  const updatedSections = extractSectionNames(updatedRosetta);
+  for (const s of updatedSections) {
+    if (!currentSections.includes(s)) changes.push(`Added section: ${s}`);
+  }
+  for (const s of currentSections) {
+    if (!updatedSections.includes(s)) changes.push(`Removed section: ${s}`);
+  }
+  if (currentLines.length !== updatedLines.length) {
+    const delta = updatedLines.length - currentLines.length;
+    changes.push(`Content ${delta > 0 ? "expanded" : "condensed"} by ${Math.abs(delta)} lines`);
+  }
+  return changes.length > 0 ? changes.join(", ") : "Minor updates to existing sections";
+}
+function extractSectionNames(content) {
+  return content.split("\n").filter((line) => line.startsWith("## ")).map((line) => line.replace("## ", "").trim());
+}
+async function syncRosetta(opts) {
+  const { cwd, provider, apiKey, model, since, onStatus } = opts;
+  const rosettaPath = import_path8.default.join(cwd, "ROSETTA.md");
+  if (!import_fs8.default.existsSync(rosettaPath)) {
+    throw new Error('ROSETTA.md not found. Run "rosetta init" first.');
+  }
+  onStatus?.("Reading current ROSETTA.md...");
+  const currentRosetta = import_fs8.default.readFileSync(rosettaPath, "utf-8");
+  onStatus?.("Analyzing git diff...");
+  const diff = getGitDiff(cwd, since);
+  if (!diff) {
+    return {
+      updated: false,
+      content: currentRosetta,
+      diff: "",
+      summary: "No changes detected since last sync"
+    };
+  }
+  const changedFiles = getChangedFilesSummary(cwd, since);
+  onStatus?.(`Sending to ${provider.displayName} (${model})...`);
+  const systemPrompt = buildSyncSystemPrompt();
+  const userPrompt = buildSyncUserPrompt(currentRosetta, diff, changedFiles);
+  const generateOpts = {
+    apiKey,
+    model,
+    systemPrompt,
+    userPrompt
+  };
+  onStatus?.("Analyzing changes...");
+  const result = await provider.generateRosetta(generateOpts);
+  const trimmed = result.trim();
+  if (trimmed === NO_CHANGES || trimmed.includes(NO_CHANGES)) {
+    return {
+      updated: false,
+      content: currentRosetta,
+      diff,
+      summary: "No documentation updates needed for these changes"
+    };
+  }
+  let updatedContent = trimmed;
+  if (updatedContent.startsWith("```markdown")) {
+    updatedContent = updatedContent.slice("```markdown".length);
+  } else if (updatedContent.startsWith("```md")) {
+    updatedContent = updatedContent.slice("```md".length);
+  } else if (updatedContent.startsWith("```")) {
+    updatedContent = updatedContent.slice(3);
+  }
+  if (updatedContent.endsWith("```")) {
+    updatedContent = updatedContent.slice(0, -3);
+  }
+  updatedContent = updatedContent.trim();
+  if (!updatedContent.startsWith("# Rosetta")) {
+    const idx = updatedContent.indexOf("# Rosetta");
+    if (idx > -1) {
+      updatedContent = updatedContent.slice(idx);
+    }
+  }
+  const summary = buildSummaryPrompt(currentRosetta, updatedContent);
+  return {
+    updated: true,
+    content: updatedContent,
+    diff,
+    summary
+  };
+}
+
+// src/cli/ai/config.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path9 = __toESM(require("path"));
-var import_chalk8 = __toESM(require("chalk"));
-var import_inquirer = __toESM(require("inquirer"));
-var import_ora = __toESM(require("ora"));
+var import_yaml2 = require("yaml");
 
 // src/cli/ai/providers.ts
 var ANTHROPIC_MODELS = [
@@ -1658,13 +1847,399 @@ function getProvider(name) {
   return provider;
 }
 
+// src/cli/ai/config.ts
+var ENV_KEY_MAP = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY"
+};
+function readConfigFile(cwd) {
+  const configPath = import_path9.default.join(cwd, ".rosetta", "config.yml");
+  if (!import_fs9.default.existsSync(configPath)) return null;
+  try {
+    const raw = import_fs9.default.readFileSync(configPath, "utf-8");
+    return (0, import_yaml2.parse)(raw);
+  } catch {
+    return null;
+  }
+}
+function saveProviderToConfig(cwd, providerName, model) {
+  const configPath = import_path9.default.join(cwd, ".rosetta", "config.yml");
+  let config = { version: 1 };
+  if (import_fs9.default.existsSync(configPath)) {
+    try {
+      const raw = import_fs9.default.readFileSync(configPath, "utf-8");
+      config = (0, import_yaml2.parse)(raw) || { version: 1 };
+    } catch {
+    }
+  }
+  config.ai = { provider: providerName, model };
+  const dir = import_path9.default.dirname(configPath);
+  if (!import_fs9.default.existsSync(dir)) {
+    import_fs9.default.mkdirSync(dir, { recursive: true });
+  }
+  import_fs9.default.writeFileSync(configPath, (0, import_yaml2.stringify)(config), "utf-8");
+}
+function resolveApiKey(providerName, flagKey) {
+  if (flagKey) return flagKey;
+  const envName = ENV_KEY_MAP[providerName];
+  if (envName && process.env[envName]) {
+    return process.env[envName];
+  }
+  if (process.env.ROSETTA_API_KEY) {
+    return process.env.ROSETTA_API_KEY;
+  }
+  return null;
+}
+function resolveConfigNonInteractive(cwd, flags) {
+  const fileConfig = readConfigFile(cwd);
+  const providerName = flags.provider || process.env.ROSETTA_PROVIDER || fileConfig?.ai?.provider || null;
+  let provider = null;
+  if (providerName && PROVIDERS[providerName]) {
+    provider = getProvider(providerName);
+  }
+  const model = flags.model || fileConfig?.ai?.model || (provider ? provider.models.find((m) => m.recommended)?.id || provider.models[0].id : null);
+  const apiKey = resolveApiKey(providerName || "", flags.key);
+  return { provider, model, apiKey, providerName };
+}
+async function resolveConfigInteractive(cwd, flags) {
+  const inquirer2 = await import("inquirer");
+  const resolved = resolveConfigNonInteractive(cwd, flags);
+  let provider = resolved.provider;
+  let providerName = resolved.providerName;
+  let model = resolved.model;
+  let apiKey = resolved.apiKey;
+  if (!provider) {
+    const providerChoices = Object.values(PROVIDERS).map((p) => ({
+      name: p.displayName,
+      value: p.name
+    }));
+    const answer = await inquirer2.default.prompt([{
+      type: "list",
+      name: "providerName",
+      message: "Which AI provider?",
+      choices: providerChoices
+    }]);
+    providerName = answer.providerName;
+    provider = getProvider(providerName);
+  }
+  if (!model) {
+    const modelChoices = provider.models.map((m) => ({
+      name: m.label,
+      value: m.id
+    }));
+    const answer = await inquirer2.default.prompt([{
+      type: "list",
+      name: "model",
+      message: "Which model?",
+      choices: modelChoices
+    }]);
+    model = answer.model;
+  }
+  if (!apiKey) {
+    const answer = await inquirer2.default.prompt([{
+      type: "password",
+      name: "apiKey",
+      message: `Enter your ${provider.displayName} API key:`,
+      mask: "*",
+      validate: (input) => input.trim().length > 0 || "API key is required"
+    }]);
+    apiKey = answer.apiKey.trim();
+  }
+  saveProviderToConfig(cwd, providerName, model);
+  return { provider, model, apiKey };
+}
+
+// src/cli/commands/sync.ts
+async function syncCommand(options) {
+  const cwd = process.cwd();
+  const rosettaPath = import_path10.default.join(cwd, "ROSETTA.md");
+  if (!import_fs10.default.existsSync(rosettaPath)) {
+    console.log(import_chalk8.default.red("Error:") + " ROSETTA.md not found.");
+    console.log(import_chalk8.default.gray("Run ") + import_chalk8.default.white("rosetta init") + import_chalk8.default.gray(" first."));
+    process.exitCode = 1;
+    return;
+  }
+  const isInteractive = process.stdin.isTTY && !options.yes;
+  let config;
+  try {
+    if (isInteractive) {
+      config = await resolveConfigInteractive(cwd, options);
+    } else {
+      const resolved = resolveConfigNonInteractive(cwd, options);
+      if (!resolved.provider || !resolved.model || !resolved.apiKey) {
+        const missing = [];
+        if (!resolved.provider) missing.push("--provider");
+        if (!resolved.apiKey) missing.push("--key or env var");
+        console.log(import_chalk8.default.red("Error:") + ` Missing config: ${missing.join(", ")}`);
+        console.log(import_chalk8.default.gray("Set via flags, env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY), or .rosetta/config.yml"));
+        process.exitCode = 1;
+        return;
+      }
+      config = {
+        provider: resolved.provider,
+        model: resolved.model,
+        apiKey: resolved.apiKey
+      };
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(import_chalk8.default.red("Config error:") + " " + msg);
+    process.exitCode = 1;
+    return;
+  }
+  if (isInteractive) {
+    const summary = getChangedFilesSummary(cwd, options.since);
+    if (summary) {
+      console.log();
+      console.log(import_chalk8.default.cyan("  Changed files:"));
+      for (const line of summary.split("\n").slice(0, 15)) {
+        console.log(import_chalk8.default.gray("    " + line));
+      }
+      console.log();
+    }
+  }
+  const spinner = (0, import_ora.default)({
+    text: "Analyzing changes...",
+    color: "cyan"
+  });
+  if (!options.dryRun) {
+    spinner.start();
+  }
+  try {
+    const result = await syncRosetta({
+      cwd,
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      since: options.since,
+      onStatus: (msg) => {
+        if (options.dryRun) {
+          console.log(import_chalk8.default.gray("  " + msg));
+        } else {
+          spinner.text = msg;
+        }
+      }
+    });
+    if (!options.dryRun) {
+      spinner.stop();
+    }
+    if (!result.updated) {
+      console.log(import_chalk8.default.green("  \u2713") + " " + result.summary);
+      return;
+    }
+    console.log(import_chalk8.default.cyan("  Changes detected:") + " " + result.summary);
+    console.log();
+    const currentContent = import_fs10.default.readFileSync(rosettaPath, "utf-8");
+    const currentLines = currentContent.split("\n");
+    const newLines = result.content.split("\n");
+    const previewLimit = 20;
+    let displayedChanges = 0;
+    for (let i = 0; i < Math.max(currentLines.length, newLines.length) && displayedChanges < previewLimit; i++) {
+      const oldLine = currentLines[i] || "";
+      const newLine = newLines[i] || "";
+      if (oldLine !== newLine) {
+        if (oldLine) console.log(import_chalk8.default.red("  - " + oldLine));
+        if (newLine) console.log(import_chalk8.default.green("  + " + newLine));
+        displayedChanges++;
+      }
+    }
+    const totalChanges = currentLines.filter((line, i) => line !== (newLines[i] || "")).length + Math.max(0, newLines.length - currentLines.length);
+    if (totalChanges > previewLimit) {
+      console.log(import_chalk8.default.gray(`  ... and ${totalChanges - previewLimit} more changes`));
+    }
+    console.log();
+    if (options.dryRun) {
+      console.log(import_chalk8.default.yellow("  Dry run \u2014 no files modified."));
+      return;
+    }
+    if (isInteractive) {
+      const inquirer2 = await import("inquirer");
+      const { confirm } = await inquirer2.default.prompt([{
+        type: "confirm",
+        name: "confirm",
+        message: "Apply these updates to ROSETTA.md?",
+        default: true
+      }]);
+      if (!confirm) {
+        console.log(import_chalk8.default.yellow("  Skipped \u2014 ROSETTA.md unchanged."));
+        return;
+      }
+    }
+    import_fs10.default.writeFileSync(rosettaPath, result.content, "utf-8");
+    console.log(import_chalk8.default.green("  \u2713") + " ROSETTA.md updated");
+  } catch (err) {
+    if (!options.dryRun) {
+      spinner.fail("Sync failed");
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(import_chalk8.default.red("  Error: ") + msg);
+    process.exitCode = 1;
+  }
+}
+
+// src/cli/commands/watch.ts
+var import_fs11 = __toESM(require("fs"));
+var import_path11 = __toESM(require("path"));
+var import_chalk9 = __toESM(require("chalk"));
+var import_child_process2 = require("child_process");
+var lastSyncHash = null;
+var syncCount = 0;
+var isRunning = false;
+function getTreeHash(cwd) {
+  try {
+    return (0, import_child_process2.execSync)("git diff --stat HEAD -- . ':!.rosetta' ':!ROSETTA.md'", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 1e4
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+function formatTime(date) {
+  return date.toLocaleTimeString("en-US", { hour12: false });
+}
+async function watchCommand(options) {
+  const cwd = process.cwd();
+  const rosettaPath = import_path11.default.join(cwd, "ROSETTA.md");
+  if (!import_fs11.default.existsSync(rosettaPath)) {
+    console.log(import_chalk9.default.red("Error:") + " ROSETTA.md not found.");
+    console.log(import_chalk9.default.gray("Run ") + import_chalk9.default.white("rosetta init") + import_chalk9.default.gray(" first."));
+    process.exitCode = 1;
+    return;
+  }
+  const intervalMinutes = parseInt(options.interval || "5", 10);
+  if (isNaN(intervalMinutes) || intervalMinutes < 1) {
+    console.log(import_chalk9.default.red("Error:") + " Interval must be at least 1 minute.");
+    process.exitCode = 1;
+    return;
+  }
+  const intervalMs = intervalMinutes * 60 * 1e3;
+  const isInteractive = process.stdin.isTTY && !options.yes;
+  const autoApply = !!options.yes;
+  let config;
+  try {
+    if (isInteractive) {
+      config = await resolveConfigInteractive(cwd, options);
+    } else {
+      const resolved = resolveConfigNonInteractive(cwd, options);
+      if (!resolved.provider || !resolved.model || !resolved.apiKey) {
+        const missing = [];
+        if (!resolved.provider) missing.push("--provider");
+        if (!resolved.apiKey) missing.push("--key or env var");
+        console.log(import_chalk9.default.red("Error:") + ` Missing config: ${missing.join(", ")}`);
+        console.log(import_chalk9.default.gray("Set via flags, env vars, or .rosetta/config.yml"));
+        process.exitCode = 1;
+        return;
+      }
+      config = {
+        provider: resolved.provider,
+        model: resolved.model,
+        apiKey: resolved.apiKey
+      };
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(import_chalk9.default.red("Config error:") + " " + msg);
+    process.exitCode = 1;
+    return;
+  }
+  lastSyncHash = getTreeHash(cwd);
+  console.log();
+  console.log(import_chalk9.default.cyan("  Rosetta Watch Mode"));
+  console.log(import_chalk9.default.gray(`  Provider: ${config.provider.displayName} (${config.model})`));
+  console.log(import_chalk9.default.gray(`  Interval: every ${intervalMinutes} minute${intervalMinutes > 1 ? "s" : ""}`));
+  console.log(import_chalk9.default.gray(`  Auto-apply: ${autoApply ? "yes" : "no (will prompt)"}`));
+  console.log();
+  console.log(import_chalk9.default.gray(`  [${formatTime(/* @__PURE__ */ new Date())}] Watching for changes... (Ctrl+C to stop)`));
+  console.log();
+  const cleanup = () => {
+    console.log();
+    console.log(import_chalk9.default.gray(`  [${formatTime(/* @__PURE__ */ new Date())}] Watch stopped. ${syncCount} sync${syncCount !== 1 ? "s" : ""} performed.`));
+    process.exit(0);
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+  const checkAndSync = async () => {
+    if (isRunning) return;
+    const currentHash = getTreeHash(cwd);
+    if (currentHash === lastSyncHash) {
+      if (isInteractive) {
+        process.stdout.write(import_chalk9.default.gray(`\r  [${formatTime(/* @__PURE__ */ new Date())}] No changes detected, waiting...`));
+      }
+      return;
+    }
+    isRunning = true;
+    try {
+      console.log(import_chalk9.default.cyan(`  [${formatTime(/* @__PURE__ */ new Date())}] Changes detected, analyzing...`));
+      const result = await syncRosetta({
+        cwd,
+        provider: config.provider,
+        apiKey: config.apiKey,
+        model: config.model,
+        onStatus: (msg) => {
+          if (isInteractive) {
+            process.stdout.write(import_chalk9.default.gray(`\r  [${formatTime(/* @__PURE__ */ new Date())}] ${msg}                    `));
+          }
+        }
+      });
+      if (!result.updated) {
+        console.log(import_chalk9.default.green(`  [${formatTime(/* @__PURE__ */ new Date())}] \u2713 ${result.summary}`));
+        lastSyncHash = currentHash;
+        isRunning = false;
+        return;
+      }
+      console.log(import_chalk9.default.cyan(`  [${formatTime(/* @__PURE__ */ new Date())}] Updates needed: ${result.summary}`));
+      if (autoApply) {
+        import_fs11.default.writeFileSync(rosettaPath, result.content, "utf-8");
+        console.log(import_chalk9.default.green(`  [${formatTime(/* @__PURE__ */ new Date())}] \u2713 ROSETTA.md updated automatically`));
+        syncCount++;
+      } else if (isInteractive) {
+        const inquirer2 = await import("inquirer");
+        const { confirm } = await inquirer2.default.prompt([{
+          type: "confirm",
+          name: "confirm",
+          message: "Apply updates to ROSETTA.md?",
+          default: true
+        }]);
+        if (confirm) {
+          import_fs11.default.writeFileSync(rosettaPath, result.content, "utf-8");
+          console.log(import_chalk9.default.green(`  [${formatTime(/* @__PURE__ */ new Date())}] \u2713 ROSETTA.md updated`));
+          syncCount++;
+        } else {
+          console.log(import_chalk9.default.yellow(`  [${formatTime(/* @__PURE__ */ new Date())}] Skipped this sync`));
+        }
+      } else {
+        console.log(import_chalk9.default.yellow(`  [${formatTime(/* @__PURE__ */ new Date())}] Updates available. Run with --yes to auto-apply.`));
+      }
+      lastSyncHash = currentHash;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(import_chalk9.default.red(`  [${formatTime(/* @__PURE__ */ new Date())}] Sync error: ${msg}`));
+    }
+    isRunning = false;
+  };
+  await checkAndSync();
+  setInterval(checkAndSync, intervalMs);
+  await new Promise(() => {
+  });
+}
+
+// src/cli/interactive/init.ts
+var import_fs13 = __toESM(require("fs"));
+var import_path13 = __toESM(require("path"));
+var import_chalk10 = __toESM(require("chalk"));
+var import_inquirer = __toESM(require("inquirer"));
+var import_ora2 = __toESM(require("ora"));
+
 // src/cli/ai/analyze.ts
-var import_fs8 = __toESM(require("fs"));
-var import_path8 = __toESM(require("path"));
-var import_child_process = require("child_process");
+var import_fs12 = __toESM(require("fs"));
+var import_path12 = __toESM(require("path"));
+var import_child_process3 = require("child_process");
 function getDirectoryTree(cwd) {
   try {
-    const files = (0, import_child_process.execSync)("git ls-files --cached --others --exclude-standard", {
+    const files = (0, import_child_process3.execSync)("git ls-files --cached --others --exclude-standard", {
       cwd,
       encoding: "utf-8",
       timeout: 1e4
@@ -1706,7 +2281,7 @@ function buildTreeString(files) {
 }
 function getBasicTree(dir, prefix, depth, maxDepth) {
   if (depth >= maxDepth) return "";
-  const entries = import_fs8.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dist").sort((a, b) => {
+  const entries = import_fs12.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dist").sort((a, b) => {
     if (a.isDirectory() && !b.isDirectory()) return -1;
     if (!a.isDirectory() && b.isDirectory()) return 1;
     return a.name.localeCompare(b.name);
@@ -1716,7 +2291,7 @@ function getBasicTree(dir, prefix, depth, maxDepth) {
     const isDir = entry.isDirectory();
     lines.push(`${prefix}${entry.name}${isDir ? "/" : ""}`);
     if (isDir) {
-      const sub = getBasicTree(import_path8.default.join(dir, entry.name), prefix + "  ", depth + 1, maxDepth);
+      const sub = getBasicTree(import_path12.default.join(dir, entry.name), prefix + "  ", depth + 1, maxDepth);
       if (sub) lines.push(sub);
     }
   }
@@ -1747,10 +2322,10 @@ function gatherKeyFiles(cwd) {
   ];
   for (const file of priorityFiles) {
     if (totalSize >= maxTotalSize) break;
-    const fullPath = import_path8.default.join(cwd, file);
-    if (import_fs8.default.existsSync(fullPath)) {
+    const fullPath = import_path12.default.join(cwd, file);
+    if (import_fs12.default.existsSync(fullPath)) {
       try {
-        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        let content = import_fs12.default.readFileSync(fullPath, "utf-8");
         if (content.length > maxFileSize) {
           content = content.slice(0, maxFileSize) + "\n... (truncated)";
         }
@@ -1785,10 +2360,10 @@ function gatherKeyFiles(cwd) {
   ];
   for (const file of sourcePatterns) {
     if (totalSize >= maxTotalSize) break;
-    const fullPath = import_path8.default.join(cwd, file);
-    if (import_fs8.default.existsSync(fullPath)) {
+    const fullPath = import_path12.default.join(cwd, file);
+    if (import_fs12.default.existsSync(fullPath)) {
       try {
-        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        let content = import_fs12.default.readFileSync(fullPath, "utf-8");
         if (content.length > maxFileSize) {
           content = content.slice(0, maxFileSize) + "\n... (truncated)";
         }
@@ -1800,15 +2375,15 @@ function gatherKeyFiles(cwd) {
       }
     }
   }
-  const srcDir = import_path8.default.join(cwd, "src");
-  if (import_fs8.default.existsSync(srcDir) && totalSize < maxTotalSize) {
+  const srcDir = import_path12.default.join(cwd, "src");
+  if (import_fs12.default.existsSync(srcDir) && totalSize < maxTotalSize) {
     const srcFiles = collectSourceFiles(srcDir, cwd, 3);
     for (const file of srcFiles) {
       if (totalSize >= maxTotalSize) break;
       if (entries.find((e) => e.relativePath === file)) continue;
-      const fullPath = import_path8.default.join(cwd, file);
+      const fullPath = import_path12.default.join(cwd, file);
       try {
-        let content = import_fs8.default.readFileSync(fullPath, "utf-8");
+        let content = import_fs12.default.readFileSync(fullPath, "utf-8");
         if (content.length > maxFileSize) {
           content = content.slice(0, maxFileSize) + "\n... (truncated)";
         }
@@ -1825,20 +2400,20 @@ function collectSourceFiles(dir, rootDir, maxDepth, depth = 0) {
   const files = [];
   const codeExtensions = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".rb"]);
   try {
-    const entries = import_fs8.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && !e.name.endsWith(".test.ts") && !e.name.endsWith(".spec.ts"));
+    const entries = import_fs12.default.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && !e.name.endsWith(".test.ts") && !e.name.endsWith(".spec.ts"));
     const indexFiles = entries.filter((e) => !e.isDirectory() && e.name.startsWith("index"));
     for (const f of indexFiles) {
-      files.push(import_path8.default.relative(rootDir, import_path8.default.join(dir, f.name)));
+      files.push(import_path12.default.relative(rootDir, import_path12.default.join(dir, f.name)));
     }
     const otherFiles = entries.filter(
-      (e) => !e.isDirectory() && !e.name.startsWith("index") && codeExtensions.has(import_path8.default.extname(e.name))
+      (e) => !e.isDirectory() && !e.name.startsWith("index") && codeExtensions.has(import_path12.default.extname(e.name))
     );
     for (const f of otherFiles.slice(0, 5)) {
-      files.push(import_path8.default.relative(rootDir, import_path8.default.join(dir, f.name)));
+      files.push(import_path12.default.relative(rootDir, import_path12.default.join(dir, f.name)));
     }
     const subDirs = entries.filter((e) => e.isDirectory());
     for (const d of subDirs) {
-      files.push(...collectSourceFiles(import_path8.default.join(dir, d.name), rootDir, maxDepth, depth + 1));
+      files.push(...collectSourceFiles(import_path12.default.join(dir, d.name), rootDir, maxDepth, depth + 1));
     }
   } catch {
   }
@@ -1860,7 +2435,7 @@ IMPORTANT INSTRUCTIONS:
 - Set the last-updated date to today's date.`;
 }
 function buildUserPrompt(cwd, tree, files) {
-  const projectName = import_path8.default.basename(cwd);
+  const projectName = import_path12.default.basename(cwd);
   let prompt = `# Codebase Analysis Request
 
 Project directory: ${projectName}
@@ -1944,9 +2519,9 @@ async function analyzeCodebase(opts) {
 // src/cli/interactive/init.ts
 async function interactiveInit() {
   const cwd = process.cwd();
-  const rosettaPath = import_path9.default.join(cwd, "ROSETTA.md");
-  const rosettaDir = import_path9.default.join(cwd, ".rosetta");
-  if (import_fs9.default.existsSync(rosettaPath)) {
+  const rosettaPath = import_path13.default.join(cwd, "ROSETTA.md");
+  const rosettaDir = import_path13.default.join(cwd, ".rosetta");
+  if (import_fs13.default.existsSync(rosettaPath)) {
     const { overwrite } = await import_inquirer.default.prompt([
       {
         type: "confirm",
@@ -1956,7 +2531,7 @@ async function interactiveInit() {
       }
     ]);
     if (!overwrite) {
-      console.log(import_chalk8.default.yellow("Aborted. Existing ROSETTA.md preserved."));
+      console.log(import_chalk10.default.yellow("Aborted. Existing ROSETTA.md preserved."));
       return;
     }
   }
@@ -1968,11 +2543,11 @@ async function interactiveInit() {
       message: "How would you like to initialize Rosetta?",
       choices: [
         {
-          name: `${import_chalk8.default.green("AI-Assisted")} ${import_chalk8.default.gray("- An AI model analyzes your codebase and generates ROSETTA.md")}`,
+          name: `${import_chalk10.default.green("AI-Assisted")} ${import_chalk10.default.gray("- An AI model analyzes your codebase and generates ROSETTA.md")}`,
           value: "ai"
         },
         {
-          name: `${import_chalk8.default.blue("Manual")} ${import_chalk8.default.gray("- Creates a template for you to fill in")}`,
+          name: `${import_chalk10.default.blue("Manual")} ${import_chalk10.default.gray("- Creates a template for you to fill in")}`,
           value: "manual"
         }
       ]
@@ -2001,8 +2576,8 @@ async function manualInit(cwd, rosettaPath, rosettaDir) {
   const templateName = template === "full" ? "ROSETTA.md" : TEMPLATES.ROSETTA_MINIMAL;
   const rosettaTemplate = loadTemplate(templateName);
   const rosettaContent = renderTemplate(rosettaTemplate, { DATE: today });
-  import_fs9.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
-  console.log(import_chalk8.default.green("  \u2713") + " Created ROSETTA.md");
+  import_fs13.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
+  console.log(import_chalk10.default.green("  \u2713") + " Created ROSETTA.md");
   createSupportFiles(rosettaDir, today);
   await promptAgentSetup();
   printNextSteps("manual");
@@ -2048,7 +2623,7 @@ async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
     }
   ]);
   console.log();
-  const spinner = (0, import_ora.default)({
+  const spinner = (0, import_ora2.default)({
     text: "Scanning project structure...",
     color: "cyan"
   }).start();
@@ -2066,14 +2641,14 @@ async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
     console.log();
     const lines = rosettaContent.split("\n");
     const previewLines = lines.slice(0, 15);
-    console.log(import_chalk8.default.gray("  \u2500\u2500\u2500 Preview \u2500\u2500\u2500"));
+    console.log(import_chalk10.default.gray("  \u2500\u2500\u2500 Preview \u2500\u2500\u2500"));
     for (const line of previewLines) {
-      console.log(import_chalk8.default.gray("  \u2502 ") + line);
+      console.log(import_chalk10.default.gray("  \u2502 ") + line);
     }
     if (lines.length > 15) {
-      console.log(import_chalk8.default.gray(`  \u2502 ... (${lines.length - 15} more lines)`));
+      console.log(import_chalk10.default.gray(`  \u2502 ... (${lines.length - 15} more lines)`));
     }
-    console.log(import_chalk8.default.gray("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+    console.log(import_chalk10.default.gray("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
     console.log();
     const { confirm } = await import_inquirer.default.prompt([
       {
@@ -2084,12 +2659,12 @@ async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
       }
     ]);
     if (!confirm) {
-      console.log(import_chalk8.default.yellow("Aborted. No files written."));
+      console.log(import_chalk10.default.yellow("Aborted. No files written."));
       return;
     }
     createDirectoryStructure(rosettaDir);
-    import_fs9.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
-    console.log(import_chalk8.default.green("  \u2713") + " Created ROSETTA.md");
+    import_fs13.default.writeFileSync(rosettaPath, rosettaContent, "utf-8");
+    console.log(import_chalk10.default.green("  \u2713") + " Created ROSETTA.md");
     const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     createSupportFiles(rosettaDir, today);
     await promptAgentSetup();
@@ -2098,12 +2673,12 @@ async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
     spinner.fail("Failed to generate ROSETTA.md");
     console.log();
     const message = err instanceof Error ? err.message : String(err);
-    console.log(import_chalk8.default.red("  Error: ") + message);
+    console.log(import_chalk10.default.red("  Error: ") + message);
     console.log();
-    console.log(import_chalk8.default.gray("  Tips:"));
-    console.log(import_chalk8.default.gray("  \u2022 Check that your API key is valid"));
-    console.log(import_chalk8.default.gray("  \u2022 Ensure you have sufficient API credits"));
-    console.log(import_chalk8.default.gray("  \u2022 Try a different model or provider"));
+    console.log(import_chalk10.default.gray("  Tips:"));
+    console.log(import_chalk10.default.gray("  \u2022 Check that your API key is valid"));
+    console.log(import_chalk10.default.gray("  \u2022 Ensure you have sufficient API credits"));
+    console.log(import_chalk10.default.gray("  \u2022 Try a different model or provider"));
     console.log();
     const { fallback } = await import_inquirer.default.prompt([
       {
@@ -2119,33 +2694,33 @@ async function aiAssistedInit(cwd, rosettaPath, rosettaDir) {
   }
 }
 function createDirectoryStructure(rosettaDir) {
-  const modulesDir = import_path9.default.join(rosettaDir, "modules");
-  if (!import_fs9.default.existsSync(rosettaDir)) {
-    import_fs9.default.mkdirSync(rosettaDir, { recursive: true });
+  const modulesDir = import_path13.default.join(rosettaDir, "modules");
+  if (!import_fs13.default.existsSync(rosettaDir)) {
+    import_fs13.default.mkdirSync(rosettaDir, { recursive: true });
   }
-  if (!import_fs9.default.existsSync(modulesDir)) {
-    import_fs9.default.mkdirSync(modulesDir, { recursive: true });
+  if (!import_fs13.default.existsSync(modulesDir)) {
+    import_fs13.default.mkdirSync(modulesDir, { recursive: true });
   }
 }
 function createSupportFiles(rosettaDir, today) {
-  const modulesDir = import_path9.default.join(rosettaDir, "modules");
+  const modulesDir = import_path13.default.join(rosettaDir, "modules");
   try {
     const notesTemplate = loadTemplate(TEMPLATES.NOTES);
     const notesContent = renderTemplate(notesTemplate, { DATE: today });
-    import_fs9.default.writeFileSync(import_path9.default.join(rosettaDir, "notes.md"), notesContent, "utf-8");
-    console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/notes.md");
+    import_fs13.default.writeFileSync(import_path13.default.join(rosettaDir, "notes.md"), notesContent, "utf-8");
+    console.log(import_chalk10.default.green("  \u2713") + " Created .rosetta/notes.md");
   } catch {
-    console.log(import_chalk8.default.red("  \u2717") + " Failed to create .rosetta/notes.md");
+    console.log(import_chalk10.default.red("  \u2717") + " Failed to create .rosetta/notes.md");
   }
   try {
     const configTemplate = loadTemplate(TEMPLATES.CONFIG);
-    import_fs9.default.writeFileSync(import_path9.default.join(rosettaDir, "config.yml"), configTemplate, "utf-8");
-    console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/config.yml");
+    import_fs13.default.writeFileSync(import_path13.default.join(rosettaDir, "config.yml"), configTemplate, "utf-8");
+    console.log(import_chalk10.default.green("  \u2713") + " Created .rosetta/config.yml");
   } catch {
-    console.log(import_chalk8.default.red("  \u2717") + " Failed to create .rosetta/config.yml");
+    console.log(import_chalk10.default.red("  \u2717") + " Failed to create .rosetta/config.yml");
   }
-  import_fs9.default.writeFileSync(import_path9.default.join(modulesDir, ".gitkeep"), "", "utf-8");
-  console.log(import_chalk8.default.green("  \u2713") + " Created .rosetta/modules/");
+  import_fs13.default.writeFileSync(import_path13.default.join(modulesDir, ".gitkeep"), "", "utf-8");
+  console.log(import_chalk10.default.green("  \u2713") + " Created .rosetta/modules/");
 }
 async function promptAgentSetup() {
   console.log();
@@ -2180,27 +2755,27 @@ async function promptAgentSetup() {
 }
 function printNextSteps(method) {
   console.log();
-  console.log(import_chalk8.default.cyan("  Rosetta initialized!"));
+  console.log(import_chalk10.default.cyan("  Rosetta initialized!"));
   console.log();
   if (method === "manual") {
-    console.log(import_chalk8.default.white("  Next steps:"));
-    console.log("    1. Edit " + import_chalk8.default.white("ROSETTA.md") + " to describe your project");
-    console.log("    2. Run " + import_chalk8.default.white("rosetta add-module <name>") + " to add module docs");
-    console.log("    3. Run " + import_chalk8.default.white("rosetta validate") + " to check your work");
+    console.log(import_chalk10.default.white("  Next steps:"));
+    console.log("    1. Edit " + import_chalk10.default.white("ROSETTA.md") + " to describe your project");
+    console.log("    2. Run " + import_chalk10.default.white("rosetta add-module <name>") + " to add module docs");
+    console.log("    3. Run " + import_chalk10.default.white("rosetta validate") + " to check your work");
   } else {
-    console.log(import_chalk8.default.white("  Next steps:"));
-    console.log("    1. Review " + import_chalk8.default.white("ROSETTA.md") + " and adjust as needed");
-    console.log("    2. Run " + import_chalk8.default.white("rosetta validate") + " to check structure");
-    console.log("    3. Run " + import_chalk8.default.white("rosetta add-module <name>") + " for detailed module docs");
+    console.log(import_chalk10.default.white("  Next steps:"));
+    console.log("    1. Review " + import_chalk10.default.white("ROSETTA.md") + " and adjust as needed");
+    console.log("    2. Run " + import_chalk10.default.white("rosetta validate") + " to check structure");
+    console.log("    3. Run " + import_chalk10.default.white("rosetta add-module <name>") + " for detailed module docs");
   }
   console.log();
-  console.log(import_chalk8.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
+  console.log(import_chalk10.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
 }
 
 // package.json
 var package_default = {
   name: "rosetta-context",
-  version: "1.4.0",
+  version: "1.5.0",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
   bin: {
@@ -2273,25 +2848,26 @@ var VERSION = package_default.version;
 var program = new import_commander.Command();
 var banner = [
   "",
-  import_chalk9.default.cyanBright("   \u2588\u2580\u2580\u2588 \u2588\u2580\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2588\u2580\u2580\u2588"),
-  import_chalk9.default.cyan("   \u2588\u2584\u2584\u2580 \u2588  \u2588 \u2580\u2580\u2588 \u2588\u2580\u2580   \u2588     \u2588   \u2588\u2584\u2584\u2588"),
-  import_chalk9.default.gray("   \u2588  \u2588 \u2580\u2580\u2580\u2580 \u2580\u2580\u2580 \u2580\u2580\u2580   \u2580     \u2580   \u2588  \u2588"),
+  import_chalk11.default.cyanBright("   \u2588\u2580\u2580\u2588 \u2588\u2580\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2580\u2580\u2588\u2580\u2580 \u2588\u2580\u2580\u2588"),
+  import_chalk11.default.cyan("   \u2588\u2584\u2584\u2580 \u2588  \u2588 \u2580\u2580\u2588 \u2588\u2580\u2580   \u2588     \u2588   \u2588\u2584\u2584\u2588"),
+  import_chalk11.default.gray("   \u2588  \u2588 \u2580\u2580\u2580\u2580 \u2580\u2580\u2580 \u2580\u2580\u2580   \u2580     \u2580   \u2588  \u2588"),
   "",
-  `   ${import_chalk9.default.gray("Agent Codebase Understanding Protocol")}  ${import_chalk9.default.cyanBright("v" + VERSION)}`,
+  `   ${import_chalk11.default.gray("Agent Codebase Understanding Protocol")}  ${import_chalk11.default.cyanBright("v" + VERSION)}`,
   ""
 ].join("\n");
 program.name("rosetta").description("Agent codebase understanding protocol - Help AI coding agents understand your codebase").version(VERSION).addHelpText("before", banner).action(() => {
   console.log(banner);
-  console.log(import_chalk9.default.cyan("  Quick Start:"));
+  console.log(import_chalk11.default.cyan("  Quick Start:"));
   console.log();
-  console.log("    " + import_chalk9.default.white("rosetta init") + import_chalk9.default.gray("         Interactive setup (AI-assisted or manual)"));
-  console.log("    " + import_chalk9.default.white("rosetta init -b") + import_chalk9.default.gray("      Initialize and get bootstrap prompt"));
-  console.log("    " + import_chalk9.default.white("rosetta status") + import_chalk9.default.gray("       Check documentation freshness"));
-  console.log("    " + import_chalk9.default.white("rosetta validate") + import_chalk9.default.gray("     Validate Rosetta file structure"));
+  console.log("    " + import_chalk11.default.white("rosetta init") + import_chalk11.default.gray("         Interactive setup (AI-assisted or manual)"));
+  console.log("    " + import_chalk11.default.white("rosetta sync") + import_chalk11.default.gray("         Update ROSETTA.md from git diffs via AI"));
+  console.log("    " + import_chalk11.default.white("rosetta watch") + import_chalk11.default.gray("        Monitor changes and auto-sync"));
+  console.log("    " + import_chalk11.default.white("rosetta status") + import_chalk11.default.gray("       Check documentation freshness"));
+  console.log("    " + import_chalk11.default.white("rosetta validate") + import_chalk11.default.gray("     Validate Rosetta file structure"));
   console.log();
-  console.log(import_chalk9.default.gray("  Run ") + import_chalk9.default.white("rosetta --help") + import_chalk9.default.gray(" for all commands"));
+  console.log(import_chalk11.default.gray("  Run ") + import_chalk11.default.white("rosetta --help") + import_chalk11.default.gray(" for all commands"));
   console.log();
-  console.log(import_chalk9.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
+  console.log(import_chalk11.default.gray("  Docs: https://github.com/metisos/Rosetta_Open_Source"));
   console.log();
 });
 program.command("init").description("Initialize Rosetta in a project (interactive by default)").option("-t, --template <template>", "Use a specific template (minimal, nextjs, python, generic)", "minimal").option("-f, --force", "Overwrite existing Rosetta files").option("-b, --bootstrap", "Output agent instructions to analyze and populate Rosetta").option("-l, --lite", "Lite mode: only create agent configs, no ROSETTA.md (for new projects)").option("--no-interactive", "Skip interactive prompts, use template mode directly").action(async (options) => {
@@ -2320,6 +2896,12 @@ program.command("bootstrap").description("Output the Bootstrap Protocol for an a
 });
 program.command("setup-agent").description("Configure agent instruction files (CLAUDE.md, .cursorrules, etc.) to use Rosetta").option("-a, --agent <agent>", "Target agent: claude, cursor, aider, or all (default: all)", "all").option("-f, --force", "Overwrite existing Rosetta sections").option("--hooks", "Install Claude Code hooks (auto-enabled for Claude agent)").option("--no-hooks", "Skip Claude Code hooks installation").action(async (options) => {
   await setupAgentCommand(options);
+});
+program.command("sync").description("Analyze git diffs and update ROSETTA.md using AI").option("-p, --provider <provider>", "AI provider: anthropic, openai, or gemini").option("-m, --model <model>", "Model to use").option("-k, --key <key>", "API key (or set via env var)").option("-s, --since <ref>", "Git ref to diff from (commit, tag, or date)").option("-y, --yes", "Auto-apply without confirmation (non-interactive)").option("-n, --dry-run", "Show proposed changes without applying").action(async (options) => {
+  await syncCommand(options);
+});
+program.command("watch").description("Monitor file changes and periodically sync ROSETTA.md").option("-p, --provider <provider>", "AI provider: anthropic, openai, or gemini").option("-m, --model <model>", "Model to use").option("-k, --key <key>", "API key (or set via env var)").option("-i, --interval <minutes>", "Sync interval in minutes (default: 5)", "5").option("-y, --yes", "Auto-apply updates without confirmation").action(async (options) => {
+  await watchCommand(options);
 });
 program.parse();
 //# sourceMappingURL=index.js.map

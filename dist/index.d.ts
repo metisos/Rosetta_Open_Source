@@ -157,6 +157,80 @@ interface AnalyzeOptions {
 declare function analyzeCodebase(opts: AnalyzeOptions): Promise<string>;
 
 /**
+ * Diff-based ROSETTA.md synchronization engine
+ * Analyzes git diffs and updates ROSETTA.md sections accordingly
+ */
+
+interface DiffSyncOptions {
+    cwd: string;
+    provider: AIProvider;
+    apiKey: string;
+    model: string;
+    since?: string;
+    onStatus?: (msg: string) => void;
+}
+interface SyncResult {
+    updated: boolean;
+    content: string;
+    diff: string;
+    summary: string;
+}
+/**
+ * Get git diff since a reference point
+ */
+declare function getGitDiff(cwd: string, since?: string): string;
+/**
+ * Run diff-based sync analysis
+ */
+declare function syncRosetta(opts: DiffSyncOptions): Promise<SyncResult>;
+
+/**
+ * AI configuration resolution
+ * Resolves provider/model/key from: CLI flags > env vars > config.yml > interactive prompts
+ */
+
+interface AIConfig {
+    provider: AIProvider;
+    model: string;
+    apiKey: string;
+}
+interface AIConfigFlags {
+    provider?: string;
+    model?: string;
+    key?: string;
+}
+interface RosettaYamlConfig {
+    version?: number;
+    ai?: {
+        provider?: string;
+        model?: string;
+    };
+    [key: string]: unknown;
+}
+/**
+ * Read AI config from .rosetta/config.yml
+ */
+declare function readConfigFile(cwd: string): RosettaYamlConfig | null;
+/**
+ * Save AI provider/model to .rosetta/config.yml (never saves the key)
+ */
+declare function saveProviderToConfig(cwd: string, providerName: string, model: string): void;
+/**
+ * Resolve API key from: flag > provider-specific env > generic env
+ */
+declare function resolveApiKey(providerName: string, flagKey?: string): string | null;
+/**
+ * Resolve full AI config non-interactively from flags + env + config file.
+ * Returns null for any field that can't be resolved.
+ */
+declare function resolveConfigNonInteractive(cwd: string, flags: AIConfigFlags): {
+    provider: AIProvider | null;
+    model: string | null;
+    apiKey: string | null;
+    providerName: string | null;
+};
+
+/**
  * Rosetta - Agent Codebase Understanding Protocol
  *
  * Programmatic API for integrating Rosetta into coding agents
@@ -189,4 +263,4 @@ declare const ROSETTA_PROTOCOL: {
     CONFIG_FILE: string;
 };
 
-export { type AIModel, type AIProvider, type GenerateOptions, PROVIDERS, type ParsedRosetta, REQUIRED_MODULE_SECTIONS, REQUIRED_SECTIONS, ROSETTA_PROTOCOL, type RosettaMetadata, type RosettaSection, TEMPLATES, analyzeCodebase, getFilesModifiedSince, getGitRoot, getLastModified, getProvider, isGitRepo, loadAndRenderTemplate, loadTemplate, parseAgentNotes, parseModuleIndex, parseRosettaFile, renderTemplate, validateSections };
+export { type AIConfig, type AIConfigFlags, type AIModel, type AIProvider, type DiffSyncOptions, type GenerateOptions, PROVIDERS, type ParsedRosetta, REQUIRED_MODULE_SECTIONS, REQUIRED_SECTIONS, ROSETTA_PROTOCOL, type RosettaMetadata, type RosettaSection, type SyncResult, TEMPLATES, analyzeCodebase, getFilesModifiedSince, getGitDiff, getGitRoot, getLastModified, getProvider, isGitRepo, loadAndRenderTemplate, loadTemplate, parseAgentNotes, parseModuleIndex, parseRosettaFile, readConfigFile, renderTemplate, resolveApiKey, resolveConfigNonInteractive, saveProviderToConfig, syncRosetta, validateSections };
