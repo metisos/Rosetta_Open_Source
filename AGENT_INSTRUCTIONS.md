@@ -395,7 +395,7 @@ Tables are token-efficient for structured data:
 If you're building an agent that uses Rosetta:
 
 ```typescript
-import { parseRosettaFile, parseModuleIndex } from 'rosetta-context';
+import { parseRosettaFile, parseModuleIndex } from '@metisos/rosetta-context';
 import fs from 'fs';
 
 // Load on session start

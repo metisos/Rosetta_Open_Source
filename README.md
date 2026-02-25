@@ -57,7 +57,7 @@ Session 4: All agents benefit from accumulated knowledge
 ### For New Projects
 
 ```bash
-npx rosetta-context init --lite
+npx @metisos/rosetta-context init --lite
 ```
 
 This creates agent config files (CLAUDE.md, .cursorrules) that tell agents:
@@ -68,11 +68,38 @@ This creates agent config files (CLAUDE.md, .cursorrules) that tell agents:
 ### For Existing Projects
 
 ```bash
-npx rosetta-context init
-npx rosetta-context setup-agent
+npx @metisos/rosetta-context init
 ```
 
-Then ask your AI agent: *"Analyze this codebase and populate ROSETTA.md"*
+Running `init` in a terminal launches an **interactive setup flow** that walks you through:
+1. Choosing AI-assisted or manual initialization
+2. Selecting an AI provider (Anthropic, OpenAI, or Gemini)
+3. Entering your API key and picking a model
+4. Automatically analyzing your codebase and generating ROSETTA.md
+5. Previewing the generated content before writing
+6. Setting up agent instruction files (CLAUDE.md, .cursorrules, .aider.conf.yml)
+
+For non-interactive use (CI, scripts), the original flag-based interface is still available:
+
+```bash
+rosetta init --no-interactive   # Template-based init
+rosetta init --bootstrap        # Output agent population prompt
+rosetta init --lite             # Agent configs only (new projects)
+```
+
+### Keeping ROSETTA.md Up to Date
+
+As your codebase evolves, ROSETTA.md can drift out of sync. Rosetta provides two commands that use AI to analyze git diffs and update your documentation automatically:
+
+```bash
+# One-time sync: analyze recent changes and update ROSETTA.md
+rosetta sync
+
+# Continuous monitoring: watch for changes and sync periodically
+rosetta watch --interval 10
+```
+
+Both commands support all three AI providers (Anthropic, OpenAI, Gemini) and resolve configuration from CLI flags, environment variables, `.rosetta/config.yml`, or interactive prompts.
 
 ### Self-Propagating Workflow
 
@@ -186,25 +213,31 @@ agent notes
 ### As a CLI Tool
 
 ```bash
-npm install -g rosetta-context
+npm install -g @metisos/rosetta-context
 ```
 
 ### Commands
 
 ```bash
-# Full initialization (existing projects with code)
-rosetta init              # Create ROSETTA.md + .rosetta/ directory
-rosetta init --bootstrap  # Initialize + get AI population prompt
+# Initialization
+rosetta init              # Interactive setup (AI-assisted or manual)
+rosetta init --lite       # Lite mode: agent configs only (for new projects)
+rosetta init --bootstrap  # Output agent population prompt
+rosetta init --no-interactive  # Skip interactive prompts, use templates
 
-# Lite initialization (new/empty projects)
-rosetta init --lite       # Only create agent configs, no ROSETTA.md yet
+# AI-powered maintenance
+rosetta sync              # Analyze git diffs and update ROSETTA.md via AI
+rosetta sync --dry-run    # Preview proposed changes without applying
+rosetta sync --since v1.0 # Diff from a specific git ref
+rosetta watch             # Monitor file changes and sync periodically
+rosetta watch -i 10 --yes # Auto-apply every 10 minutes
 
 # Agent configuration
 rosetta setup-agent       # Configure CLAUDE.md, .cursorrules, .aider.conf.yml + Claude hooks
 rosetta setup-agent -a claude  # Configure Claude with hooks
 rosetta setup-agent --no-hooks # Configure without installing Claude hooks
 
-# Maintenance
+# Manual maintenance
 rosetta status            # Check documentation freshness/staleness
 rosetta validate          # Validate structure
 rosetta add-module <name> # Create module file
@@ -217,9 +250,51 @@ rosetta bootstrap         # Output bootstrap prompt
 | Scenario | Command | What it creates |
 |----------|---------|-----------------|
 | **New project** (no code yet) | `rosetta init --lite` | Agent configs only - agents will create ROSETTA.md when ready |
-| **Existing project** (has code) | `rosetta init` | Full Rosetta setup - ROSETTA.md + .rosetta/ |
+| **Existing project** (has code) | `rosetta init` | Interactive AI-assisted setup - ROSETTA.md + .rosetta/ |
 | **After init** | `rosetta setup-agent` | Configures CLAUDE.md, .cursorrules, .aider.conf.yml + Claude hooks |
 | **Hooks only** | `rosetta setup-agent -a claude --hooks` | Install Claude Code hooks for automatic Rosetta enforcement |
+| **Keep docs current** | `rosetta sync` | AI-analyzes git diffs and updates ROSETTA.md |
+| **Continuous sync** | `rosetta watch` | Monitors changes and syncs on an interval |
+
+### AI-Assisted Initialization
+
+When you run `rosetta init` in a terminal, you get an interactive flow:
+
+1. Choose between AI-assisted or manual (template-based) initialization
+2. If AI-assisted, select your provider: Anthropic, OpenAI, or Gemini
+3. Enter your API key (never stored -- only used for the current session)
+4. Pick a model from the provider's lineup
+5. Rosetta scans your codebase and sends it to the AI for analysis
+6. Preview the generated ROSETTA.md before it's written
+7. Optionally set up agent instruction files in the same flow
+
+If the AI call fails, you can fall back to the manual template.
+
+### Sync and Watch
+
+`rosetta sync` performs a one-shot update of ROSETTA.md based on what has changed in your git history:
+
+```bash
+rosetta sync                     # Interactive: prompts for provider/key/confirmation
+rosetta sync --yes               # Non-interactive: auto-apply changes
+rosetta sync --dry-run           # Preview only, no writes
+rosetta sync --since HEAD~10     # Diff from a specific ref
+rosetta sync -p anthropic -k $ANTHROPIC_API_KEY  # Explicit provider/key
+```
+
+`rosetta watch` runs as a long-lived process that polls for git changes and syncs periodically:
+
+```bash
+rosetta watch                    # Interactive: prompts on each sync cycle
+rosetta watch --yes              # Auto-apply all updates
+rosetta watch --interval 10      # Check every 10 minutes (default: 5)
+```
+
+Both commands resolve AI configuration in priority order:
+1. CLI flags (`--provider`, `--key`, `--model`)
+2. Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`)
+3. `.rosetta/config.yml` (provider and model saved here; API key is never stored)
+4. Interactive prompts (TTY only)
 
 ### Quality Gates
 
@@ -234,7 +309,7 @@ npm run typecheck # TypeScript compiler sanity check
 ### As a Library
 
 ```bash
-npm install rosetta-context
+npm install @metisos/rosetta-context
 ```
 
 ```typescript
@@ -245,7 +320,7 @@ import {
   parseAgentNotes,
   REQUIRED_SECTIONS,
   ROSETTA_PROTOCOL
-} from 'rosetta-context';
+} from '@metisos/rosetta-context';
 
 // Parse ROSETTA.md
 const parsed = parseRosettaFile(content);
@@ -367,7 +442,7 @@ read:
 ### Custom Agent Integration
 
 ```typescript
-import { parseRosettaFile, parseModuleIndex } from 'rosetta-context';
+import { parseRosettaFile, parseModuleIndex } from '@metisos/rosetta-context';
 import fs from 'fs';
 
 // Load root context

@@ -185,6 +185,14 @@ staleness:
   warning: 30    # Days before showing staleness warning
   critical: 90   # Days before marking as critically stale
 
+# AI provider for sync and watch commands (optional)
+# API keys should be set via environment variables:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+# Or pass via --key flag
+ai: {}
+  # provider: anthropic    # anthropic, openai, or gemini
+  # model: claude-sonnet-4-20250514
+
 # File patterns to track for drift detection (optional)
 # When these files change, related module docs may need updating
 track: []
