@@ -57,7 +57,7 @@ Session 4: All agents benefit from accumulated knowledge
 ### For New Projects
 
 ```bash
-npx rosetta-context init --lite
+npx @metisos/rosetta-context init --lite
 ```
 
 This creates agent config files (CLAUDE.md, .cursorrules) that tell agents:
@@ -68,8 +68,8 @@ This creates agent config files (CLAUDE.md, .cursorrules) that tell agents:
 ### For Existing Projects
 
 ```bash
-npx rosetta-context init
-npx rosetta-context setup-agent
+npx @metisos/rosetta-context init
+npx @metisos/rosetta-context setup-agent
 ```
 
 Then ask your AI agent: *"Analyze this codebase and populate ROSETTA.md"*
@@ -186,7 +186,7 @@ agent notes
 ### As a CLI Tool
 
 ```bash
-npm install -g rosetta-context
+npm install -g @metisos/rosetta-context
 ```
 
 ### Commands
@@ -234,7 +234,7 @@ npm run typecheck # TypeScript compiler sanity check
 ### As a Library
 
 ```bash
-npm install rosetta-context
+npm install @metisos/rosetta-context
 ```
 
 ```typescript
@@ -245,7 +245,7 @@ import {
   parseAgentNotes,
   REQUIRED_SECTIONS,
   ROSETTA_PROTOCOL
-} from 'rosetta-context';
+} from '@metisos/rosetta-context';
 
 // Parse ROSETTA.md
 const parsed = parseRosettaFile(content);
@@ -367,7 +367,7 @@ read:
 ### Custom Agent Integration
 
 ```typescript
-import { parseRosettaFile, parseModuleIndex } from 'rosetta-context';
+import { parseRosettaFile, parseModuleIndex } from '@metisos/rosetta-context';
 import fs from 'fs';
 
 // Load root context

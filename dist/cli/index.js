@@ -2774,7 +2774,7 @@ function printNextSteps(method) {
 
 // package.json
 var package_default = {
-  name: "rosetta-context",
+  name: "@metisos/rosetta-context",
   version: "1.5.0",
   description: "Agent-first codebase context protocol - AI agents build and share institutional knowledge about codebases",
   main: "dist/index.js",
